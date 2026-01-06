@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from pydantic import SecretStr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ...exceptions.v1.errors import XiansServerError
@@ -30,20 +29,11 @@ class XiansServerClient:
         config: XiansServerConfig,
         cache_dir: Path | None = None,
     ) -> None:
-        """
-        Initialize Xians Server client.
-
-        Args:
-            config: Server connection configuration.
-            cache_dir: Optional directory for caching uploaded definition hashes.
-        """
         self.config = config
         self.cache_dir = cache_dir or Path.home() / ".xians" / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache_file = self.cache_dir / "uploaded_definitions.json"
         self._uploaded_hashes: dict[str, str] = self._load_cache()
-
-        # Create httpx client
         self._client = httpx.AsyncClient(
             base_url=str(config.server_url),
             headers={"X-API-Key": config.api_key.get_secret_value()},
@@ -77,12 +67,6 @@ class XiansServerClient:
     async def fetch_temporal_settings(self) -> dict[str, Any]:
         """
         Fetch Temporal connection settings from Xians Server.
-
-        Returns:
-            Dictionary containing Temporal host, port, namespace, etc.
-
-        Raises:
-            XiansServerError: If the request fails.
         """
         try:
             response = await self._client.get("/api/agent/settings/flowserver")
@@ -106,22 +90,11 @@ class XiansServerClient:
     async def upload_agent_definition(self, definition: AgentDefinition) -> str:
         """
         Upload agent definition to Xians Server (idempotent).
-
-        Args:
-            definition: The agent definition to upload.
-
-        Returns:
-            The agent key (identifier) assigned by the server.
-
-        Raises:
-            XiansServerError: If the upload fails.
         """
-        # Compute hash for idempotency
         content = definition.model_dump_json(exclude={"hash", "agent_key"})
         definition_hash = compute_hash(content)
         definition.hash = definition_hash
 
-        # Check if already uploaded
         cache_key = f"agent:{definition.name}"
         if cache_key in self._uploaded_hashes:
             cached_hash = self._uploaded_hashes[cache_key]
@@ -129,7 +102,6 @@ class XiansServerClient:
                 logger.debug(f"Agent '{definition.name}' already uploaded (hash: {definition_hash})")
                 return definition.agent_key or definition.name
 
-        # Upload to server
         try:
             response = await self._client.post(
                 "/api/agent/definitions",
@@ -139,7 +111,6 @@ class XiansServerClient:
             result = response.json()
             agent_key = result.get("agent_key", definition.name)
 
-            # Cache the uploaded hash
             self._uploaded_hashes[cache_key] = definition_hash
             self._save_cache()
 
@@ -161,22 +132,11 @@ class XiansServerClient:
     async def upload_workflow_definition(self, definition: WorkflowDefinition) -> str:
         """
         Upload workflow definition to Xians Server (idempotent).
-
-        Args:
-            definition: The workflow definition to upload.
-
-        Returns:
-            The workflow identifier assigned by the server.
-
-        Raises:
-            XiansServerError: If the upload fails.
         """
-        # Compute hash for idempotency
         content = definition.model_dump_json(exclude={"hash"})
         definition_hash = compute_hash(content)
         definition.hash = definition_hash
 
-        # Check if already uploaded
         cache_key = f"workflow:{definition.agent_key}:{definition.name}"
         if cache_key in self._uploaded_hashes:
             cached_hash = self._uploaded_hashes[cache_key]
@@ -184,7 +144,6 @@ class XiansServerClient:
                 logger.debug(f"Workflow '{definition.name}' already uploaded (hash: {definition_hash})")
                 return definition.name
 
-        # Upload to server
         try:
             response = await self._client.post(
                 "/api/agent/definitions/workflows",
@@ -194,7 +153,6 @@ class XiansServerClient:
             result = response.json()
             workflow_id = result.get("workflow_id", definition.name)
 
-            # Cache the uploaded hash
             self._uploaded_hashes[cache_key] = definition_hash
             self._save_cache()
 
@@ -221,14 +179,6 @@ class XiansServerClient:
     ) -> None:
         """
         Send an outbound message to a conversation.
-
-        Args:
-            conversation_id: The conversation identifier.
-            message: The message text to send.
-            metadata: Optional additional metadata.
-
-        Raises:
-            XiansServerError: If the request fails.
         """
         payload = {
             "conversation_id": conversation_id,
@@ -259,19 +209,12 @@ class XiansServerClient:
     async def send_usage_event(self, event: dict[str, Any]) -> None:
         """
         Send a usage event to Xians Server.
-
-        Args:
-            event: Usage event data.
-
-        Raises:
-            XiansServerError: If the request fails.
         """
         try:
             response = await self._client.post("/api/agent/usage", json=event)
             response.raise_for_status()
             logger.debug("Successfully sent usage event")
         except httpx.HTTPStatusError as e:
-            # Usage events are best-effort, log but don't raise
             logger.warning(f"Failed to send usage event: {e.response.status_code}")
         except Exception as e:
             logger.warning(f"Unexpected error sending usage event: {str(e)}")
@@ -284,17 +227,6 @@ class XiansServerClient:
     ) -> dict[str, Any]:
         """
         Query knowledge base.
-
-        Args:
-            query: The search query.
-            top_k: Number of results to return.
-            metadata_filter: Optional metadata filters.
-
-        Returns:
-            Knowledge search results.
-
-        Raises:
-            XiansServerError: If the request fails.
         """
         payload = {
             "query": query,
@@ -322,15 +254,6 @@ class XiansServerClient:
     async def fetch_document(self, document_id: str) -> dict[str, Any]:
         """
         Fetch a document by ID.
-
-        Args:
-            document_id: The document identifier.
-
-        Returns:
-            Document data.
-
-        Raises:
-            XiansServerError: If the request fails.
         """
         try:
             response = await self._client.get(f"/api/agent/documents/{document_id}")

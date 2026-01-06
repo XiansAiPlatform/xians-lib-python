@@ -1,9 +1,3 @@
-"""
-Test fixtures and configuration for Xians SDK tests.
-
-Provides common fixtures for all tests.
-"""
-
 import pytest
 from pydantic import SecretStr
 

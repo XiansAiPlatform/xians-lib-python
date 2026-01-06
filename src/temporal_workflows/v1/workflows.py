@@ -12,13 +12,32 @@ from ...models.v1.entities import AgentRequest, AgentResponse
 logger = logging.getLogger(__name__)
 
 
+# Shared retry policy configuration
+_DEFAULT_RETRY_POLICY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    maximum_interval=timedelta(seconds=30),
+    maximum_attempts=3,
+    non_retryable_error_types=["ValueError", "ValidationError"],
+)
+
+_DEFAULT_ACTIVITY_TIMEOUT = timedelta(minutes=5)
+
+
+def _create_error_response(error: Exception) -> AgentResponse:
+    """
+    Create a standardized error response.
+    """
+    return AgentResponse(
+        text=f"Agent execution failed: {str(error)}",
+        metadata={"error": str(error), "error_type": type(error).__name__},
+    )
+
+
 @workflow.defn
 class InvokeAgentWorkflow:
     """
     Simple invoke workflow for stateless agent execution.
 
-    This workflow executes a single agent activity and returns the result.
-    It's designed for request-response patterns without session state.
     """
 
     @workflow.run
@@ -26,32 +45,20 @@ class InvokeAgentWorkflow:
         """
         Execute a single agent request.
 
-        Args:
-            request: The agent request to process.
-
-        Returns:
-            The agent's response.
         """
         workflow.logger.info(
             f"InvokeAgentWorkflow started for agent: {request.agent_key}, "
             f"conversation: {request.conversation_id}"
         )
 
-        # Get activity name from workflow memo or use default
         activity_name = workflow.memo_value("activity_name", default="execute_agent_activity")
 
-        # Execute the agent activity with retries
         try:
             response = await workflow.execute_activity(
                 activity_name,
                 request,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=RetryPolicy(
-                    initial_interval=timedelta(seconds=1),
-                    maximum_interval=timedelta(seconds=30),
-                    maximum_attempts=3,
-                    non_retryable_error_types=["ValueError", "ValidationError"],
-                ),
+                start_to_close_timeout=_DEFAULT_ACTIVITY_TIMEOUT,
+                retry_policy=_DEFAULT_RETRY_POLICY,
             )
 
             workflow.logger.info(f"InvokeAgentWorkflow completed for agent: {request.agent_key}")
@@ -61,41 +68,53 @@ class InvokeAgentWorkflow:
             workflow.logger.error(
                 f"InvokeAgentWorkflow failed for agent {request.agent_key}: {str(e)}"
             )
-            # Return error response instead of raising
-            return AgentResponse(
-                text=f"Agent execution failed: {str(e)}",
-                metadata={"error": str(e), "error_type": type(e).__name__},
-            )
+            return _create_error_response(e)
 
 
 @workflow.defn
 class ConversationWorkflow:
     """
     Long-running conversational workflow with session state.
-
-    This workflow maintains a conversation session and handles:
-    - Signals for fire-and-forget messages
-    - Updates for request-response interactions
-    - Query for session state inspection
     """
 
     def __init__(self) -> None:
-        """Initialize conversation state."""
         self._messages: list[dict[str, Any]] = []
         self._session_metadata: dict[str, Any] = {}
         self._activity_name = "execute_agent_activity"
+
+    def _record_message(
+        self, message: str, metadata: dict[str, Any], direction: str
+    ) -> None:
+        """
+        Record a message in the conversation history.
+        """
+        self._messages.append(
+            {
+                "message": message,
+                "metadata": metadata,
+                "timestamp": workflow.now().isoformat(),
+                "direction": direction,
+            }
+        )
+
+    def _create_agent_request(
+        self, message: str, metadata: dict[str, Any]
+    ) -> AgentRequest:
+        """
+        Create an AgentRequest from message data.
+
+        """
+        return AgentRequest(
+            agent_key=self._session_metadata["agent_key"],
+            conversation_id=self._session_metadata["conversation_id"],
+            message=message,
+            metadata=metadata,
+        )
 
     @workflow.run
     async def run(self, agent_key: str, conversation_id: str) -> dict[str, Any]:
         """
         Start and maintain a conversation session.
-
-        Args:
-            agent_key: The agent identifier.
-            conversation_id: The conversation identifier.
-
-        Returns:
-            Final session summary.
         """
         workflow.logger.info(
             f"ConversationWorkflow started for agent: {agent_key}, "
@@ -108,12 +127,10 @@ class ConversationWorkflow:
             "started_at": workflow.now().isoformat(),
         }
 
-        # Get activity name from memo if provided
         self._activity_name = workflow.memo_value(
             "activity_name", default="execute_agent_activity"
         )
 
-        # Wait indefinitely - workflow is controlled by signals/updates or external cancellation
         await workflow.wait_condition(lambda: False)
 
         return {
@@ -127,33 +144,13 @@ class ConversationWorkflow:
         """
         Handle an inbound message (fire-and-forget).
 
-        Args:
-            message: The message text.
-            metadata: Optional message metadata.
         """
         workflow.logger.info(f"Received inbound message for conversation workflow")
 
-        self._messages.append(
-            {
-                "message": message,
-                "metadata": metadata or {},
-                "timestamp": workflow.now().isoformat(),
-                "direction": "inbound",
-            }
-        )
+        metadata = metadata or {}
+        self._record_message(message, metadata, "inbound")
+        request = self._create_agent_request(message, metadata)
 
-        # Create agent request
-        request = AgentRequest(
-            agent_key=self._session_metadata["agent_key"],
-            conversation_id=self._session_metadata["conversation_id"],
-            message=message,
-            metadata=metadata or {},
-        )
-
-        # Execute agent activity (fire and forget - no await needed for signal)
-        # Note: In signals, we typically don't await activities directly
-        # Instead, we'd use workflow.start_activity or queue the message
-        # For now, we'll just log it
         workflow.logger.debug(f"Message queued for processing: {message[:50]}...")
 
     @workflow.update
@@ -162,73 +159,38 @@ class ConversationWorkflow:
     ) -> AgentResponse:
         """
         Handle a request-response message interaction.
-
-        Args:
-            message: The message text.
-            metadata: Optional message metadata.
-
-        Returns:
-            The agent's response.
         """
         workflow.logger.info(f"Processing request_response for conversation workflow")
 
-        self._messages.append(
-            {
-                "message": message,
-                "metadata": metadata or {},
-                "timestamp": workflow.now().isoformat(),
-                "direction": "inbound",
-            }
-        )
+        metadata = metadata or {}
+        self._record_message(message, metadata, "inbound")
 
-        # Create agent request
-        request = AgentRequest(
-            agent_key=self._session_metadata["agent_key"],
-            conversation_id=self._session_metadata["conversation_id"],
-            message=message,
-            metadata=metadata or {},
-        )
+        request = self._create_agent_request(message, metadata)
 
-        # Execute the agent activity
         try:
             response = await workflow.execute_activity(
                 self._activity_name,
                 request,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=RetryPolicy(
-                    initial_interval=timedelta(seconds=1),
-                    maximum_interval=timedelta(seconds=30),
-                    maximum_attempts=3,
-                    non_retryable_error_types=["ValueError", "ValidationError"],
-                ),
+                start_to_close_timeout=_DEFAULT_ACTIVITY_TIMEOUT,
+                retry_policy=_DEFAULT_RETRY_POLICY,
             )
 
-            # Record response
-            self._messages.append(
-                {
-                    "message": response.text or str(response.payload),
-                    "metadata": response.metadata,
-                    "timestamp": workflow.now().isoformat(),
-                    "direction": "outbound",
-                }
+            self._record_message(
+                response.text or str(response.payload),
+                response.metadata,
+                "outbound"
             )
 
             return response
 
         except Exception as e:
             workflow.logger.error(f"Agent activity failed: {str(e)}")
-            return AgentResponse(
-                text=f"Agent execution failed: {str(e)}",
-                metadata={"error": str(e), "error_type": type(e).__name__},
-            )
+            return _create_error_response(e)
 
     @workflow.query
     def get_session_state(self) -> dict[str, Any]:
         """
         Query the current session state.
-
-        Returns:
-            Current session metadata and message count.
         """
         return {
             "metadata": self._session_metadata,
@@ -243,8 +205,6 @@ class ConversationWorkflow:
         """
         Query the message history.
 
-        Returns:
-            List of all messages in the conversation.
         """
         return self._messages
 

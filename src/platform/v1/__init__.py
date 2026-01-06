@@ -12,29 +12,21 @@ from ...temporal_workflows.v1 import (
 )
 
 __all__ = [
-    # Platform
     "XiansPlatform",
-    # Configuration
     "XiansOptions",
     "XiansServerConfig",
     "TemporalConfig",
     "LLMConfig",
-    # Models
     "AgentRequest",
     "AgentResponse",
     "AgentDefinition",
     "WorkflowDefinition",
-    # Clients
     "AgentClient",
     "XiansServerClient",
-    # Workflows
     "InvokeAgentWorkflow",
     "ConversationWorkflow",
-    # Worker
     "WorkerHost",
-    # Utilities
     "build_task_queue_name",
-    # Constants
     "WorkflowType",
 ]
 

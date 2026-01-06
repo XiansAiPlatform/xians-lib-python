@@ -16,21 +16,9 @@ logger = logging.getLogger(__name__)
 class AgentClient:
     """
     Client for invoking and interacting with agent workflows.
-
-    Provides methods for:
-    - Invoking one-shot agent executions
-    - Sending updates to conversational workflows
-    - Sending signals to conversational workflows
-    - Querying workflow state
     """
 
     def __init__(self, temporal_client: Client) -> None:
-        """
-        Initialize agent client.
-
-        Args:
-            temporal_client: Connected Temporal client.
-        """
         self.client = temporal_client
 
     async def invoke(
@@ -41,22 +29,6 @@ class AgentClient:
         workflow_type: str = "InvokeAgentWorkflow",
         timeout: timedelta = timedelta(minutes=5),
     ) -> AgentResponse:
-        """
-        Invoke a one-shot agent execution.
-
-        Args:
-            workflow_id: Unique workflow identifier.
-            task_queue: Task queue name.
-            request: The agent request.
-            workflow_type: Workflow type name (default: InvokeAgentWorkflow).
-            timeout: Workflow execution timeout.
-
-        Returns:
-            The agent's response.
-
-        Raises:
-            TemporalError: If workflow execution fails.
-        """
         try:
             handle = await self.client.start_workflow(
                 workflow_type,
@@ -89,19 +61,6 @@ class AgentClient:
     ) -> WorkflowHandle:
         """
         Start a long-running conversation workflow.
-
-        Args:
-            workflow_id: Unique workflow identifier.
-            task_queue: Task queue name.
-            agent_key: The agent identifier.
-            conversation_id: The conversation identifier.
-            workflow_type: Workflow type name (default: ConversationWorkflow).
-
-        Returns:
-            Handle to the running workflow.
-
-        Raises:
-            TemporalError: If workflow start fails.
         """
         try:
             handle = await self.client.start_workflow(
@@ -132,14 +91,6 @@ class AgentClient:
     ) -> None:
         """
         Send a signal to a running workflow.
-
-        Args:
-            workflow_id: The workflow identifier.
-            signal_name: The signal name.
-            *args: Signal arguments.
-
-        Raises:
-            TemporalError: If signal send fails.
         """
         try:
             handle = self.client.get_workflow_handle(workflow_id)
@@ -161,17 +112,6 @@ class AgentClient:
     ) -> Any:
         """
         Send an update to a running workflow and wait for result.
-
-        Args:
-            workflow_id: The workflow identifier.
-            update_name: The update name.
-            *args: Update arguments.
-
-        Returns:
-            The update result.
-
-        Raises:
-            TemporalError: If update fails.
         """
         try:
             handle = self.client.get_workflow_handle(workflow_id)
@@ -194,17 +134,6 @@ class AgentClient:
     ) -> Any:
         """
         Query a running workflow.
-
-        Args:
-            workflow_id: The workflow identifier.
-            query_name: The query name.
-            *args: Query arguments.
-
-        Returns:
-            The query result.
-
-        Raises:
-            TemporalError: If query fails.
         """
         try:
             handle = self.client.get_workflow_handle(workflow_id)
@@ -222,12 +151,6 @@ class AgentClient:
     async def cancel_workflow(self, workflow_id: str) -> None:
         """
         Cancel a running workflow.
-
-        Args:
-            workflow_id: The workflow identifier.
-
-        Raises:
-            TemporalError: If cancellation fails.
         """
         try:
             handle = self.client.get_workflow_handle(workflow_id)
@@ -248,16 +171,6 @@ class AgentClient:
     ) -> Any:
         """
         Get the result of a workflow execution.
-
-        Args:
-            workflow_id: The workflow identifier.
-            timeout: Optional timeout for waiting.
-
-        Returns:
-            The workflow result.
-
-        Raises:
-            TemporalError: If getting result fails.
         """
         try:
             handle = self.client.get_workflow_handle(workflow_id)

@@ -5,7 +5,12 @@ from typing import Callable
 
 from temporalio.client import Client
 
+from ...configs.v1.logging import configure_logging
+from ...constants.v1.core import WorkflowType
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
+from ...middleware.v1 import (
+    initialize_middleware,
+)
 from ...models.v1.configs import TemporalConfig, XiansOptions, XiansServerConfig
 from ...models.v1.entities import AgentDefinition, WorkflowDefinition
 from ...temporal_workflows.v1.worker_runner import WorkerHost, WorkerRegistry
@@ -28,36 +33,24 @@ class AgentRegistration:
     ) -> None:
         """
         Initialize agent registration.
-
-        Args:
-            platform: Parent platform instance.
-            definition: Agent definition.
         """
         self.platform = platform
         self.definition = definition
         self.workflows: list[WorkflowDefinition] = []
 
-    def define_invoke_workflow(
+    def _define_workflow(
         self,
-        name: str = "InvokeAgent",
-        workers: int = 1,
-        activity_func: Callable | None = None,
+        workflow_type: WorkflowType,
+        workflow_class: type,
+        name: str,
+        workers: int,
+        activity_func: Callable | None,
     ) -> WorkflowDefinition:
         """
-        Define an invoke (one-shot) workflow for this agent.
-
-        Args:
-            name: Workflow name.
-            workers: Number of workers.
-            activity_func: Activity function to execute the agent.
-
-        Returns:
-            The workflow definition.
+        Internal helper to define a workflow for this agent.
         """
-        from ...constants.v1.core import WorkflowType
-
         workflow_def = WorkflowDefinition(
-            workflow_type=WorkflowType.TASK_BASED,
+            workflow_type=workflow_type,
             name=name,
             workers=workers,
             agent_key=self.definition.agent_key or self.definition.name,
@@ -66,19 +59,37 @@ class AgentRegistration:
 
         self.workflows.append(workflow_def)
 
-        # Register with worker registry
         if activity_func:
             self.platform._worker_registry.register(
                 agent_key=workflow_def.agent_key,
                 workflow_name=workflow_def.name,
-                workflow_class=InvokeAgentWorkflow,
+                workflow_class=workflow_class,
                 activity_func=activity_func,
                 system_scoped=self.definition.system_scoped,
                 workers=workers,
             )
 
-        logger.info(f"Defined invoke workflow '{name}' for agent '{self.definition.name}'")
+        logger.info(f"Defined {workflow_type} workflow '{name}' for agent '{self.definition.name}'")
         return workflow_def
+
+    def define_invoke_workflow(
+        self,
+        name: str = "InvokeAgent",
+        workers: int = 1,
+        activity_func: Callable | None = None,
+    ) -> WorkflowDefinition:
+        """
+        Define a task-based (invoke) workflow for this agent.
+        """
+        from ...constants.v1.core import WorkflowType
+
+        return self._define_workflow(
+            workflow_type=WorkflowType.TASK_BASED,
+            workflow_class=InvokeAgentWorkflow,
+            name=name,
+            workers=workers,
+            activity_func=activity_func,
+        )
 
     def define_conversation_workflow(
         self,
@@ -88,42 +99,16 @@ class AgentRegistration:
     ) -> WorkflowDefinition:
         """
         Define a conversational (long-running) workflow for this agent.
-
-        Args:
-            name: Workflow name.
-            workers: Number of workers.
-            activity_func: Activity function to execute the agent.
-
-        Returns:
-            The workflow definition.
         """
         from ...constants.v1.core import WorkflowType
 
-        workflow_def = WorkflowDefinition(
+        return self._define_workflow(
             workflow_type=WorkflowType.CONVERSATIONAL,
+            workflow_class=ConversationWorkflow,
             name=name,
             workers=workers,
-            agent_key=self.definition.agent_key or self.definition.name,
-            activity_name=activity_func.__name__ if activity_func else "execute_agent_activity",
+            activity_func=activity_func,
         )
-
-        self.workflows.append(workflow_def)
-
-        # Register with worker registry
-        if activity_func:
-            self.platform._worker_registry.register(
-                agent_key=workflow_def.agent_key,
-                workflow_name=workflow_def.name,
-                workflow_class=ConversationWorkflow,
-                activity_func=activity_func,
-                system_scoped=self.definition.system_scoped,
-                workers=workers,
-            )
-
-        logger.info(
-            f"Defined conversation workflow '{name}' for agent '{self.definition.name}'"
-        )
-        return workflow_def
 
 
 class AgentRegistry:
@@ -132,12 +117,6 @@ class AgentRegistry:
     """
 
     def __init__(self, platform: "XiansPlatform") -> None:
-        """
-        Initialize agent registry.
-
-        Args:
-            platform: Parent platform instance.
-        """
         self.platform = platform
         self._agents: dict[str, AgentRegistration] = {}
 
@@ -147,17 +126,6 @@ class AgentRegistry:
         description: str | None = None,
         system_scoped: bool = False,
     ) -> AgentRegistration:
-        """
-        Register a new agent.
-
-        Args:
-            name: Agent name.
-            description: Optional agent description.
-            system_scoped: Whether agent is system-scoped.
-
-        Returns:
-            Agent registration for workflow configuration.
-        """
         definition = AgentDefinition(
             name=name,
             description=description,
@@ -172,24 +140,15 @@ class AgentRegistry:
         return agent_reg
 
     def get(self, name: str) -> AgentRegistration | None:
-        """Get an agent registration by name."""
         return self._agents.get(name)
 
     def all(self) -> list[AgentRegistration]:
-        """Get all registered agents."""
         return list(self._agents.values())
 
 
 class XiansPlatform:
     """
     Main entry point for Xians SDK.
-
-    Provides:
-    - Platform initialization and configuration
-    - Agent registration
-    - Workflow definition
-    - Worker management
-    - Client access for workflow invocation
     """
 
     def __init__(
@@ -200,11 +159,6 @@ class XiansPlatform:
     ) -> None:
         """
         Initialize platform (use XiansPlatform.initialize() instead).
-
-        Args:
-            options: Platform options.
-            xians_client: Xians server client.
-            temporal_config: Temporal configuration.
         """
         self.options = options
         self.xians_client = xians_client
@@ -214,33 +168,29 @@ class XiansPlatform:
         self._worker_registry = WorkerRegistry()
         self._temporal_client: Client | None = None
 
-        # Public registries
         self.agents = AgentRegistry(self)
 
     @classmethod
     async def initialize(cls, options: XiansOptions) -> "XiansPlatform":
         """
         Initialize the Xians platform.
-
-        Args:
-            options: Platform configuration options.
-
-        Returns:
-            Initialized platform instance.
-
-        Raises:
-            ConfigurationError: If initialization fails.
         """
+        initialize_middleware()
+        logger.info("Exception handler middleware initialized")
+
+        configure_logging(
+            log_level=options.log_level,
+            enable_structured=options.enable_structured_logging,
+        )
+
         logger.info("Initializing Xians Platform...")
 
-        # Create Xians server client
         server_config = XiansServerConfig(
             server_url=options.server_url,
             api_key=options.api_key,
         )
         xians_client = XiansServerClient(server_config)
 
-        # Fetch Temporal settings if not provided
         temporal_config = options.temporal
         if temporal_config is None:
             logger.info("Fetching Temporal settings from Xians Server...")
@@ -267,58 +217,70 @@ class XiansPlatform:
     async def run_all(self) -> None:
         """
         Start all registered workers and run until stopped.
-
-        This will:
-        1. Connect to Temporal
-        2. Upload agent/workflow definitions to Xians Server
-        3. Start workers for all registered workflows
-        4. Run until interrupted
-
-        Raises:
-            TemporalError: If worker startup fails.
         """
         logger.info("Starting Xians Platform workers...")
 
-        # Initialize worker host
-        self._worker_host = WorkerHost(self.temporal_config)
-        await self._worker_host.connect()
+        try:
 
-        # Store client reference
-        self._temporal_client = self._worker_host.client
+            self._worker_host = WorkerHost(self.temporal_config)
+            await self._worker_host.connect()
 
-        # Upload definitions to Xians Server
-        await self._upload_definitions()
+            self._temporal_client = self._worker_host.client
 
-        # Start workers for all registered task queues
-        task_queues = self._worker_registry.get_all_task_queues()
+            await self._upload_definitions()
 
-        if not task_queues:
-            logger.warning("No workflows registered. Nothing to run.")
-            return
+            task_queues = self._worker_registry.get_all_task_queues()
 
-        for task_queue in task_queues:
-            workflows = self._worker_registry.get_workflows_for_queue(task_queue)
-            activities = self._worker_registry.get_activities_for_queue(task_queue)
-            worker_count = self._worker_registry.get_worker_count(task_queue)
+            if not task_queues:
+                logger.warning("No workflows registered. Nothing to run.")
+                return
 
-            # Register workflows and activities
-            for workflow in workflows:
-                self._worker_host.register_workflow(workflow)
-            for activity in activities:
-                self._worker_host.register_activity(activity)
+            for task_queue in task_queues:
+                workflows = self._worker_registry.get_workflows_for_queue(task_queue)
+                activities = self._worker_registry.get_activities_for_queue(task_queue)
+                worker_count = self._worker_registry.get_worker_count(task_queue)
 
-            # Start workers
-            await self._worker_host.start_workers(
-                task_queues=[task_queue],
-                workflows=workflows,
-                activities=activities,
-                workers_per_queue=worker_count,
+                for workflow in workflows:
+                    self._worker_host.register_workflow(workflow)
+                for activity in activities:
+                    self._worker_host.register_activity(activity)
+
+                await self._worker_host.start_workers(
+                    task_queues=[task_queue],
+                    workflows=workflows,
+                    activities=activities,
+                    workers_per_queue=worker_count,
+                )
+
+            logger.info(f"Started workers for {len(task_queues)} task queues")
+
+            await self._worker_host.run_until_stopped()
+
+        except KeyboardInterrupt:
+            logger.info("Received shutdown signal (Ctrl+C)")
+            raise
+
+        except Exception as e:
+            logger.error(f"Failed to run workers: {str(e)}", exc_info=True)
+            raise TemporalError(
+                f"Worker execution failed: {str(e)}",
+                cause=e,
             )
 
-        logger.info(f"Started workers for {len(task_queues)} task queues")
+        finally:
+            logger.info("Cleaning up resources...")
+            if self._worker_host:
+                try:
+                    await self._worker_host.shutdown()
+                    logger.info("Workers shut down successfully")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during worker cleanup: {cleanup_error}")
 
-        # Run until stopped
-        await self._worker_host.run_until_stopped()
+            try:
+                await self.xians_client.close()
+                logger.info("Xians client closed successfully")
+            except Exception as cleanup_error:
+                logger.warning(f"Error closing Xians client: {cleanup_error}")
 
     async def _upload_definitions(self) -> None:
         """Upload agent and workflow definitions to Xians Server."""
@@ -331,14 +293,20 @@ class XiansPlatform:
                 )
                 agent_reg.definition.agent_key = agent_key
 
-                # Upload workflow definitions
                 for workflow_def in agent_reg.workflows:
                     workflow_def.agent_key = agent_key
-                    await self.xians_client.upload_workflow_definition(workflow_def)
+                    try:
+                        await self.xians_client.upload_workflow_definition(workflow_def)
+                        logger.debug(f"Uploaded workflow definition: {workflow_def.name}")
+                    except Exception as wf_error:
+                        logger.warning(
+                            f"Failed to upload workflow definition for {workflow_def.name}: {wf_error}"
+                        )
 
             except Exception as e:
                 logger.warning(
-                    f"Failed to upload definition for agent {agent_reg.definition.name}: {e}"
+                    f"Failed to upload definition for agent {agent_reg.definition.name}: {e}",
+                    exc_info=True,
                 )
 
         logger.info("Definitions uploaded successfully")
@@ -346,12 +314,6 @@ class XiansPlatform:
     def client(self) -> AgentClient:
         """
         Get an agent client for invoking workflows.
-
-        Returns:
-            Agent client instance.
-
-        Raises:
-            ConfigurationError: If Temporal client is not initialized.
         """
         if not self._temporal_client:
             raise ConfigurationError(
@@ -375,12 +337,28 @@ class XiansPlatform:
         """Shutdown platform and cleanup resources."""
         logger.info("Shutting down Xians Platform...")
 
-        if self._worker_host:
-            await self._worker_host.shutdown()
+        errors = []
 
-        await self.xians_client.close()
+        try:
+            if self._worker_host:
+                try:
+                    await self._worker_host.shutdown()
+                    logger.info("Workers shut down successfully")
+                except Exception as e:
+                    errors.append(f"Worker shutdown error: {e}")
+                    logger.error(f"Error shutting down workers: {e}", exc_info=True)
+        finally:
+            try:
+                await self.xians_client.close()
+                logger.info("Xians client closed successfully")
+            except Exception as e:
+                errors.append(f"Xians client close error: {e}")
+                logger.error(f"Error closing Xians client: {e}", exc_info=True)
 
-        logger.info("Xians Platform shutdown complete")
+        if errors:
+            logger.warning(f"Shutdown completed with {len(errors)} error(s)")
+        else:
+            logger.info("Xians Platform shutdown complete")
 
 
 __all__ = [
