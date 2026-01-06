@@ -69,9 +69,9 @@ if __name__ == "__main__":
 
 ## 📖 Documentation
 
-- **[User Guide](USER_GUIDE.md)** - Complete guide for using the SDK
-- **[Development Guide](DEVELOPMENT_GUIDE.md)** - Guide for contributing to the SDK
-- **[Architecture](ARCHITECTURE.md)** - Deep dive into SDK design
+- **[User Guide](docs/USER_GUIDE.md)** - Complete guide for using the SDK
+- **[Development Guide](docs/DEVELOPMENT_GUIDE.md)** - Guide for contributing to the SDK
+- **[Architecture](docs/ARCHITECTURE.md)** - Deep dive into SDK design
 - **[API Reference](./docs/API.md)** - Detailed API documentation
 - **[Examples](./examples/)** - Working code examples
 
@@ -220,7 +220,7 @@ pytest tests/test_models.py    # Specific file
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Development Guide](DEVELOPMENT_GUIDE.md) for details.
+We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT_GUIDE.md) for details.
 
 1. Fork the repository
 2. Create a feature branch
@@ -240,7 +240,7 @@ We welcome contributions! Please see our [Development Guide](DEVELOPMENT_GUIDE.m
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
