@@ -1,181 +1,264 @@
 # Xians Python SDK
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](../LICENSE)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](http://mypy-lang.org/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/xians-platform/xians-lib-python/workflows/tests/badge.svg)](https://github.com/xians-platform/xians-lib-python/actions)
 
-Enterprise-grade Python SDK for building Temporal-native AI agents with Xians platform integration.
+**Temporal-first agent execution substrate with optional Xians Server integration.**
 
-## Features
+Build durable, scalable AI agents using ANY framework—LangChain, custom code, or your own implementation. The SDK provides the infrastructure; you provide the intelligence.
 
-- 🔄 **Temporal-Native Agent Runtime**: Build long-running, durable agent workflows on Temporal
-- 🔌 **Xians Server Integration**: Seamless integration with Xians platform for knowledge, documents, and conversations
-- 🤖 **LLM Framework-Agnostic**: Bring your own LLM provider (OpenAI, Anthropic, Azure, etc.)
-- 🛡️ **Enterprise-Grade**: Type-safe, tested, and production-ready
-- 📦 **Flexible Workflows**: Support for both built-in and custom workflow patterns
+---
 
-## Installation
+## ✨ Features
+
+- 🔄 **Durable Execution**: Run agents on Temporal for fault tolerance and reliability
+- 🎯 **Framework-Agnostic**: Use ANY agent framework—no vendor lock-in
+- 🚀 **Production-Ready**: Typed, tested, and enterprise-grade
+- 💬 **Long-Running Sessions**: Support for conversational workflows with state
+- 🔌 **Optional Server Integration**: Connect to Xians Server for additional features
+- 📊 **Observability**: Built-in logging and Temporal UI integration
+
+---
+
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
 pip install xians-lib-python
 ```
 
-For development:
-
-```bash
-pip install "xians-lib-python[dev]"
-```
-
-## Quick Start
-
-### Platform-Style Usage
+### Basic Example
 
 ```python
-from xians.platform.v1 import XiansPlatform, XiansOptions
+import asyncio
+from temporalio import activity
+from xians.platform.v1 import XiansPlatform, XiansOptions, AgentRequest, AgentResponse
 
-# Initialize the platform
-platform = await XiansPlatform.initialize(
-    XiansOptions(
-        server_url="https://api.xians.ai",
-        api_key="your-api-key",
-        temporal=None,  # Auto-fetch from server
-        llm=LLMOptions(provider="openai", model="gpt-4")
+# Define your agent activity (ANY framework allowed!)
+@activity.defn
+async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
+    # Your agent logic here - completely framework-agnostic
+    result = your_agent_framework.run(request.message)
+    return AgentResponse(text=result)
+
+async def main():
+    # Initialize platform
+    platform = await XiansPlatform.initialize(
+        XiansOptions(
+            server_url="https://api.xians.ai",
+            api_key="your-api-key",
+            temporal=TemporalConfig(host="localhost", port=7233),
+            llm=LLMConfig(provider="openai", model="gpt-4", api_key="sk-..."),
+        )
     )
-)
 
-# Register an agent
-agent = platform.agents.register(name="My Agent", system_scoped=False)
+    # Register agent
+    agent = platform.agents.register(name="MyAgent")
+    agent.define_invoke_workflow(activity_func=execute_agent_activity)
 
-# Define a built-in workflow
-wf = agent.workflows.define_builtin("Conversational", workers=2)
+    # Run workers
+    await platform.run_all()
 
-# Handle chat messages
-@wf.on_user_chat_message
-async def handle_chat(ctx):
-    resp = await ctx.llm.chat(
-        messages=[{"role": "user", "content": ctx.message.text}],
-        model=ctx.config.llm.model,
-    )
-    await ctx.reply(resp.text)
-
-# Run all workflows
-await agent.run_all()
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-## Development
+---
+
+## 📖 Documentation
+
+- **[User Guide](USER_GUIDE.md)** - Complete guide for using the SDK
+- **[Development Guide](DEVELOPMENT_GUIDE.md)** - Guide for contributing to the SDK
+- **[Architecture](ARCHITECTURE.md)** - Deep dive into SDK design
+- **[API Reference](./docs/API.md)** - Detailed API documentation
+- **[Examples](./examples/)** - Working code examples
+
+---
+
+## 🎯 Use Cases
+
+### ✅ One-Shot Agent Execution
+
+Perfect for stateless agent tasks:
+
+```python
+agent.define_invoke_workflow(
+    name="InvokeAgent",
+    workers=2,
+    activity_func=execute_agent_activity,
+)
+```
+
+### ✅ Conversational Agents
+
+Long-running sessions with state management:
+
+```python
+agent.define_conversation_workflow(
+    name="Conversation",
+    workers=1,
+    activity_func=execute_conversational_agent,
+)
+```
+
+### ✅ Multi-Tenant Deployments
+
+Isolated execution per tenant:
+
+```python
+for tenant in tenants:
+    agent = platform.agents.register(name=f"Agent-{tenant.id}")
+    # Automatic task queue isolation per tenant
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│     Your Agent (ANY Framework)              │
+│  - LangChain                                │
+│  - Custom Code                              │
+│  - Or anything else                         │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│        Xians SDK (This Library)             │
+│  - Temporal workflows                       │
+│  - Worker management                        │
+│  - Optional Xians Server integration        │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│            Temporal Server                  │
+│  - Durable execution                        │
+│  - State management                         │
+│  - Retries & fault tolerance                │
+└─────────────────────────────────────────────┘
+```
+
+**Key Principle**: The SDK owns workflows; you provide activities. This keeps workflows deterministic while allowing complete flexibility in your agent implementation.
+
+---
+
+## 🔑 Key Concepts
+
+### Platform
+
+The main entry point for the SDK:
+
+```python
+platform = await XiansPlatform.initialize(options)
+```
+
+### Agents
+
+Register agents with unique names:
+
+```python
+agent = platform.agents.register(name="MyAgent", system_scoped=False)
+```
+
+### Workflows
+
+Two types provided:
+
+- **InvokeAgentWorkflow**: One-shot request-response
+- **ConversationWorkflow**: Long-running with state
+
+### Activities
+
+Where YOUR agent logic lives (black box to SDK):
+
+```python
+@activity.defn
+async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
+    # Use ANY framework here
+    return AgentResponse(text="...")
+```
+
+---
+
+## 🛠️ Development
 
 ### Setup
 
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/xians-platform/xians-lib-python.git
 cd xians-lib-python
 
 # Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
-# Install dependencies
+# Install dev dependencies
 pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+./scripts/format.sh
+
+# Lint code
+./scripts/lint.sh
 ```
 
 ### Running Tests
 
 ```bash
-# Quick smoke test (30 seconds)
-python smoke_test.py
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run specific test types
-pytest -m unit
-pytest -m integration
+pytest                          # Run all tests
+pytest --cov=src               # With coverage
+pytest tests/test_models.py    # Specific file
 ```
 
-### Verify Installation
+---
 
-```bash
-# Quick import check
-python -c "
-from src.models.v1 import LLMMessage, AgentDefinition
-from src.constants.v1 import LLMProvider
-from src.utils.v1 import compute_hash
-print('✅ Library is working!')
-"
+## 🤝 Contributing
 
-# Or run the smoke test
-python smoke_test.py
-```
+We welcome contributions! Please see our [Development Guide](DEVELOPMENT_GUIDE.md) for details.
 
-For detailed verification instructions, see [VERIFICATION_GUIDE.md](VERIFICATION_GUIDE.md).
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Run tests and linters
+5. Submit a pull request
 
-### Code Quality
+---
 
-```bash
-# Format code
-black src tests
-isort src tests
-
-# Lint
-ruff check src tests
-
-# Type check
-mypy src
-```
-
-## Project Structure
-
-```
-src/
-├── configs/v1/          # Configuration models and settings
-├── constants/v1/        # Constants and enums
-├── exceptions/v1/       # Custom exception classes
-├── interfaces/v1/       # Abstract base classes and protocols
-├── llm_adapters/v1/     # LLM provider adapters
-├── models/v1/           # Pydantic data models
-├── temporal_workflows/v1/ # Temporal workflow definitions
-└── utils/v1/            # Utility functions and helpers
-```
-
-## Documentation
-
-- [Full Documentation](https://docs.xians.ai/python)
-- [API Reference](https://docs.xians.ai/python/api)
-- [Examples](https://github.com/xians-platform/xians-examples-python)
-
-## Requirements
+## 📋 Requirements
 
 - Python 3.10 or higher
 - Temporal server (local or cloud)
-- Xians platform account (optional, for platform features)
+- (Optional) Xians Server access
 
-## Contributing
+---
 
-Contributions are welcome! Please read our [Contributing Guidelines](DEVELOPMENT_GUIDE.md) before submitting PRs.
-
-## License
+## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
 
-## Support
+---
 
-- 📧 Email: support@xians.ai
-- 💬 Discord: [Join our community](https://discord.gg/xians)
-- 🐛 Issues: [GitHub Issues](https://github.com/xians-platform/xians-lib-python/issues)
+## 🔗 Links
 
-## Roadmap
+- **Documentation**: [docs/](./docs/)
+- **GitHub**: [xians-platform/xians-lib-python](https://github.com/xians-platform/xians-lib-python)
+- **Issues**: [GitHub Issues](https://github.com/xians-platform/xians-lib-python/issues)
+- **Temporal**: [temporal.io](https://temporal.io)
+- **Xians Platform**: [xians.ai](https://xians.ai)
 
-- [x] Core SDK structure
-- [ ] Temporal workflow runtime
-- [ ] Xians server client
-- [ ] LLM adapters (OpenAI, Anthropic, Azure)
-- [ ] Built-in workflow types
-- [ ] Knowledge & document APIs
-- [ ] Usage tracking
-- [ ] Comprehensive examples
+---
+
+## 💬 Support
+
+- 📧 Email: 
+
+---
+
+**Built with ❤️ by the Xians Platform team**
 

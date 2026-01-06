@@ -100,7 +100,7 @@ pytest -m integration
    ```
    
    Follow [Conventional Commits](https://www.conventionalcommits.org/):
-   - `feat:` for new features
+   - `feature:` for new features
    - `fix:` for bug fixes
    - `docs:` for documentation
    - `test:` for tests
@@ -122,7 +122,6 @@ src/
 ├── constants/v1/        # Constants and enums
 ├── exceptions/v1/       # Custom exceptions
 ├── interfaces/v1/       # Abstract interfaces
-├── llm_adapters/v1/     # LLM provider adapters
 ├── models/v1/           # Pydantic data models
 ├── temporal_workflows/v1/ # Temporal workflows
 └── utils/v1/            # Utility functions
@@ -131,8 +130,7 @@ src/
 ## Questions?
 
 - Open an issue for bugs or feature requests
-- Join our Discord for discussions
-- Email: dev@xians.ai
+- Email:
 
 ## License
 

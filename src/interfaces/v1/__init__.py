@@ -1,8 +1,12 @@
-from . import client, llm
-from .client import IXiansClient
-from .llm import ILLMAdapter
+from . import agent_client, platform, xians_client
+from .agent_client import AgentClient
+from .platform import AgentRegistration, AgentRegistry, XiansPlatform
+from .xians_client import XiansServerClient
 
 __all__ = [
-    "IXiansClient",
-    "ILLMAdapter",
+    "XiansServerClient",
+    "AgentClient",
+    "XiansPlatform",
+    "AgentRegistry",
+    "AgentRegistration",
 ]
