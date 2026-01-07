@@ -72,6 +72,38 @@ class XiansServerConfig(BaseModel):
 
     model_config = {"frozen": False}
 
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: SecretStr) -> SecretStr:
+        """Validate API key to catch common mistakes."""
+        key_value = v.get_secret_value().strip()
+
+        if not key_value:
+            raise ValueError("API key cannot be empty")
+
+        if len(key_value) < 10:
+            raise ValueError("API key appears to be too short (minimum 10 characters)")
+
+        placeholder_patterns = [
+            "your-api-key",
+            "your_api_key",
+            "xxx",
+            "placeholder",
+            "test",
+            "example",
+        ]
+
+        key_lower = key_value.lower()
+        for pattern in placeholder_patterns:
+            if pattern in key_lower:
+                raise ValueError(
+                    f"API key appears to be a placeholder ('{pattern}' detected). "
+                    "Please replace with your actual API key."
+                )
+
+        # Return with stripped whitespace
+        return SecretStr(key_value)
+
 
 class XiansOptions(BaseModel):
     """
@@ -94,6 +126,46 @@ class XiansOptions(BaseModel):
     )
 
     model_config = {"frozen": False}
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def validate_api_key(cls, v: str | SecretStr) -> SecretStr:
+        """Validate API key to catch common mistakes."""
+        # Handle both plain strings and SecretStr
+        if isinstance(v, SecretStr):
+            key_value = v.get_secret_value()
+        else:
+            key_value = str(v) if v is not None else ""
+
+        # Strip whitespace
+        key_value = key_value.strip()
+
+        if not key_value:
+            raise ValueError("API key cannot be empty")
+
+        if len(key_value) < 10:
+            raise ValueError("API key appears to be too short (minimum 10 characters)")
+
+        # Check for common placeholder values (only check first 50 chars to avoid false positives on long tokens)
+        check_value = key_value[:50].lower()
+        placeholder_patterns = [
+            "your-api-key",
+            "your_api_key",
+            "xxx",
+            "placeholder",
+            "test-key",
+            "example-key",
+        ]
+
+        for pattern in placeholder_patterns:
+            if pattern in check_value:
+                raise ValueError(
+                    f"API key appears to be a placeholder ('{pattern}' detected). "
+                    "Please replace with your actual API key."
+                )
+
+        # Return with stripped whitespace
+        return SecretStr(key_value)
 
     @field_validator("log_level")
     @classmethod

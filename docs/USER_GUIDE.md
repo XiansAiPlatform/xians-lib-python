@@ -549,7 +549,71 @@ async def main():
 
 ### Common Issues
 
-#### 1. "Temporal client not initialized"
+#### 1. "Authentication failed (401 Unauthorized)"
+
+**Cause:** Invalid, expired, or missing API key.
+
+**Solution:**
+1. **Verify API key is set correctly:**
+   ```python
+   from xians.platform.v1 import XiansOptions
+   
+   options = XiansOptions(
+       server_url="https://api.agentri.ai",
+       api_key="your-actual-api-key-here",  # NOT a placeholder!
+       llm=...,
+   )
+   ```
+
+2. **Check API key validity:**
+   - Log in to your Xians dashboard
+   - Navigate to Settings → API Keys
+   - Verify the key exists and hasn't expired
+   - Generate a new key if needed
+
+3. **Verify environment variables (if using):**
+   ```bash
+   # If loading from environment
+   echo $XIANS_API_KEY
+   ```
+   ```python
+   import os
+   from pydantic import SecretStr
+   
+   options = XiansOptions(
+       server_url="https://api.agentri.ai",
+       api_key=SecretStr(os.environ["XIANS_API_KEY"]),
+       llm=...,
+   )
+   ```
+
+4. **Enable debug logging to verify configuration:**
+   ```python
+   import logging
+   logging.basicConfig(level=logging.DEBUG)
+   
+   # You should see:
+   # DEBUG:xians.interfaces.v1.xians_client:Initializing XiansServerClient with server_url=...
+   ```
+
+5. **Test API key manually:**
+   ```python
+   import httpx
+   
+   async def test_api_key():
+       async with httpx.AsyncClient() as client:
+           response = await client.get(
+               "https://api.agentri.ai/api/agent/settings/flowserver",
+               headers={"X-API-Key": "your-api-key"},
+           )
+           print(f"Status: {response.status_code}")
+           if response.status_code == 200:
+               print("✅ API key is valid!")
+           else:
+               print(f"❌ Error: {response.text}")
+   ```
+
+#### 2. "Temporal client not initialized"
 
 **Cause:** Trying to get client before connecting to Temporal.
 
@@ -559,7 +623,7 @@ await platform.connect_temporal()  # or
 await platform.run_all()
 ```
 
-#### 2. Workflow not found
+#### 3. Workflow not found
 
 **Cause:** Task queue mismatch or workers not started.
 
@@ -568,7 +632,7 @@ await platform.run_all()
 - Ensure workers are running
 - Check `build_task_queue_name()` output
 
-#### 3. Activity timeout
+#### 4. Activity timeout
 
 **Cause:** Activity takes longer than configured timeout.
 
@@ -582,7 +646,7 @@ response = await workflow.execute_activity(
 )
 ```
 
-#### 4. "Failed to fetch Temporal settings"
+#### 5. "Failed to fetch Temporal settings"
 
 **Cause:** Xians Server not accessible or API key invalid.
 

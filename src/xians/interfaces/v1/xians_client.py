@@ -34,9 +34,16 @@ class XiansServerClient:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache_file = self.cache_dir / "uploaded_definitions.json"
         self._uploaded_hashes: dict[str, str] = self._load_cache()
+
+        api_key_value = config.api_key.get_secret_value()
+        logger.debug(
+            f"Initializing XiansServerClient with server_url={config.server_url}, "
+            f"api_key={'*' * min(len(api_key_value), 8)} (length: {len(api_key_value)})"
+        )
+
         self._client = httpx.AsyncClient(
             base_url=str(config.server_url),
-            headers={"X-API-Key": config.api_key.get_secret_value()},
+            headers={"X-API-Key": api_key_value},
             timeout=config.timeout_seconds,
             verify=config.verify_ssl,
         )
@@ -67,6 +74,9 @@ class XiansServerClient:
     async def fetch_temporal_settings(self) -> dict[str, Any]:
         """
         Fetch Temporal connection settings from Xians Server.
+
+        Raises:
+            XiansServerError: If authentication fails or server returns an error.
         """
         try:
             response = await self._client.get("/api/agent/settings/flowserver")
@@ -75,8 +85,22 @@ class XiansServerClient:
             logger.info("Successfully fetched Temporal settings from Xians Server")
             return data
         except httpx.HTTPStatusError as e:
+            # Enhanced error message for authentication failures
+            if e.response.status_code == 401:
+                error_msg = (
+                    "Authentication failed (401 Unauthorized). "
+                    "Please verify that:\n"
+                    "  1. Your API key is correct and valid\n"
+                    "  2. The API key has not expired\n"
+                    "  3. The API key is properly set in XiansOptions(api_key='...')\n"
+                    f"  4. The server URL is correct: {self.config.server_url}"
+                )
+                logger.error(error_msg)
+            else:
+                error_msg = f"Failed to fetch Temporal settings: {e.response.status_code}"
+
             raise XiansServerError(
-                f"Failed to fetch Temporal settings: {e.response.status_code}",
+                error_msg,
                 status_code=e.response.status_code,
                 response_body=e.response.text,
                 cause=e,

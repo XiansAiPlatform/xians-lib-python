@@ -105,12 +105,12 @@ def test_xians_options_valid(sample_llm_config: LLMConfig) -> None:
     """Test XiansOptions with valid data."""
     options = XiansOptions(
         server_url="https://api.xians.ai",
-        api_key=SecretStr("xians-key"),
+        api_key=SecretStr("sk-valid-api-key-123456"),
         llm=sample_llm_config,
     )
 
     assert str(options.server_url) == "https://api.xians.ai/"
-    assert options.api_key.get_secret_value() == "xians-key"
+    assert options.api_key.get_secret_value() == "sk-valid-api-key-123456"
     assert options.log_level == "INFO"  # default
 
 
@@ -120,7 +120,7 @@ def test_xians_options_log_level_validation() -> None:
     # Valid log level
     options = XiansOptions(
         server_url="https://api.xians.ai",
-        api_key=SecretStr("key"),
+        api_key=SecretStr("valid-api-key-12345"),
         llm=LLMConfig(provider=LLMProvider.OPENAI, model="gpt-4"),
         log_level="debug",  # lowercase
     )
@@ -130,7 +130,7 @@ def test_xians_options_log_level_validation() -> None:
     with pytest.raises(ValidationError) as exc_info:
         XiansOptions(
             server_url="https://api.xians.ai",
-            api_key=SecretStr("key"),
+            api_key=SecretStr("valid-api-key-12345"),
             llm=LLMConfig(provider=LLMProvider.OPENAI, model="gpt-4"),
             log_level="INVALID",
         )
