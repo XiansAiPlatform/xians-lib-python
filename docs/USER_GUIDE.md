@@ -74,7 +74,6 @@ from xians.platform.v1 import (
     XiansPlatform,
     XiansOptions,
     TemporalConfig,
-    LLMConfig,
     AgentRequest,
     AgentResponse,
 )
@@ -87,7 +86,7 @@ async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
     return AgentResponse(text=f"Echo: {message}")
 
 async def main():
-    # Initialize platform
+    # Initialize platform (NO LLM config needed!)
     platform = await XiansPlatform.initialize(
         XiansOptions(
             server_url="https://api.xians.ai",
@@ -96,11 +95,6 @@ async def main():
                 host="localhost",
                 port=7233,
                 namespace="default",
-            ),
-            llm=LLMConfig(
-                provider="openai",
-                model="gpt-4",
-                api_key="your-openai-key",
             ),
         )
     )
@@ -141,7 +135,7 @@ python my_agent.py
 ```python
 import asyncio
 from datetime import timedelta
-from xians.platform.v1 import XiansPlatform, AgentRequest, XiansOptions, LLMConfig
+from xians.platform.v1 import XiansPlatform, AgentRequest, XiansOptions
 from xians.models.v1.configs import TemporalConfig
 
 async def main():
@@ -151,11 +145,6 @@ async def main():
         server_url="https://api.xians.ai",  # Plain string works!
         api_key="<base64 bearer cert>",  # Plain string works!
         temporal=TemporalConfig(address="localhost:7233", namespace="default"),
-        llm=LLMConfig(
-            provider="openai",  # Plain string works!
-            model="gpt-4o-mini",
-            api_key="<openai-key>",  # Plain string works!
-        ),
     )
 
     platform = await XiansPlatform.initialize(options)
@@ -186,14 +175,16 @@ if __name__ == "__main__":
 
 ## Configuring the SDK
 
-This section explains how to configure the SDK using the Pydantic v2 models defined in `src/xians/models/v1/configs.py`. The central entry point is `XiansOptions`, which aggregates server, Temporal, and LLM settings.
+This section explains how to configure the SDK using the Pydantic v2 models defined in `src/xians/models/v1/configs.py`. The central entry point is `XiansOptions`, which aggregates server and Temporal settings.
 
-> **💡 Pro Tip:** You can use simple strings for most configuration fields! The SDK automatically converts plain strings to the appropriate types (`SecretStr`, `HttpUrl`, `LLMProvider` enums). This makes configuration more intuitive while maintaining type safety internally.
+> **💡 Pro Tip:** You can use simple strings for most configuration fields! The SDK automatically converts plain strings to the appropriate types (`SecretStr`, `HttpUrl`). This makes configuration more intuitive while maintaining type safety internally.
+
+> **⚠️ Important Change:** The `llm` parameter is **deprecated** and no longer required. LLM configuration and invocation should be handled entirely in your activity implementation. The SDK does not validate, store, or transmit LLM configuration.
 
 ### XiansOptions (Top-level)
 
 ```python
-from xians.models.v1.configs import XiansOptions, TemporalConfig, LLMConfig
+from xians.models.v1.configs import XiansOptions, TemporalConfig
 
 # Simple string usage - SDK handles type conversion automatically!
 options = XiansOptions(
@@ -207,16 +198,6 @@ options = XiansOptions(
         namespace="prod",
         task_queue="xians-agents",
     ),
-    llm=LLMConfig(
-        provider="openai",  # Plain string → LLMProvider enum
-        model="gpt-4o-mini",
-        api_key="<openai-key>",  # Plain string → SecretStr
-        api_base="https://api.openai.com/v1",  # Plain string → HttpUrl
-        temperature=0.7,
-        max_tokens=2048,
-        timeout_seconds=60,
-        extra_params={"top_p": 0.9},
-    ),
     log_level="INFO",
     enable_structured_logging=False,
 )
@@ -225,6 +206,7 @@ options = XiansOptions(
 Key behaviors:
 - `server_auth_mode` supports `"bearer_cert"` (default) and `"x_api_key"` with case-insensitive normalization.
 - `api_key` is an alias for `server_api_key` and is stored as `SecretStr`.
+- `llm` parameter is **deprecated** - configure LLM in your activities instead.
 - Validation rejects empty or obviously placeholder credentials.
 - `log_level` is normalized to uppercase and must be one of `DEBUG, INFO, WARNING, ERROR, CRITICAL`.
 
@@ -282,10 +264,14 @@ Notes:
 
 ### LLMConfig
 
+> **⚠️ DEPRECATED:** The `LLMConfig` model is no longer required by `XiansOptions`. LLM configuration and invocation should be handled entirely within your activity implementation. You can use any LLM library (OpenAI SDK, Anthropic SDK, LangChain, etc.) directly in your activities.
+
+The `LLMConfig` model is still available for your own use if you want structured LLM configuration in your application:
+
 ```python
 from xians.models.v1.configs import LLMConfig
 
-# Simple string usage - SDK handles type conversion
+# You can still use LLMConfig in YOUR application code (not for SDK initialization)
 llm_cfg = LLMConfig(
     provider="openai",  # Plain string → LLMProvider enum
     model="gpt-4o",
@@ -296,6 +282,20 @@ llm_cfg = LLMConfig(
     timeout_seconds=30,
     extra_params={"frequency_penalty": 0.2},
 )
+
+# Use it in your activity:
+@activity.defn
+async def my_agent_activity(request: AgentRequest) -> AgentResponse:
+    # Load your LLM config from environment or config file
+    import openai
+    openai.api_key = llm_cfg.api_key.get_secret_value()
+    
+    response = openai.ChatCompletion.create(
+        model=llm_cfg.model,
+        messages=[{"role": "user", "content": request.message}],
+        temperature=llm_cfg.temperature,
+    )
+    return AgentResponse(text=response.choices[0].message.content)
 ```
 
 Validation:
@@ -354,12 +354,10 @@ class AppSettings(BaseSettings):
     temporal_tls_client_key_path: str | None = None
     temporal_tls_domain: str | None = None
 
-    llm_provider: str
-    llm_model: str
-    llm_api_key: SecretStr | None = None
-    llm_temperature: float = 0.7
-    llm_max_tokens: int = 1024
-    llm_timeout_seconds: int = 30
+    # Note: LLM config is NO LONGER part of XiansOptions
+    # Configure LLM in your activities instead
+    # llm_provider: str  # DEPRECATED - remove from XiansOptions
+    # llm_model: str     # DEPRECATED - remove from XiansOptions
 
     class Config:
         env_prefix = "XIANS_"
@@ -385,14 +383,7 @@ options = XiansOptions(
             domain=settings.temporal_tls_domain,
         ) if settings.temporal_tls_enabled else None,
     ),
-    llm=LLMConfig(
-        provider=settings.llm_provider,
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
-        timeout_seconds=settings.llm_timeout_seconds,
-    ),
+    # llm parameter removed - configure LLM in your activities
 )
 ```
 
@@ -408,12 +399,10 @@ export XIANS_TEMPORAL_ADDRESS="temporal.example.com:7233"
 export XIANS_TEMPORAL_NAMESPACE="prod"
 export XIANS_TEMPORAL_TASK_QUEUE="xians-agents"
 
-export XIANS_LLM_PROVIDER="openai"
-export XIANS_LLM_MODEL="gpt-4o"
-export XIANS_LLM_API_KEY="<openai key>"
-export XIANS_LLM_TEMPERATURE="0.5"
-export XIANS_LLM_MAX_TOKENS="2048"
-export XIANS_LLM_TIMEOUT_SECONDS="60"
+# LLM configuration is now handled in YOUR activities
+# You can load these in your activity implementation:
+# export OPENAI_API_KEY="<openai key>"
+# export ANTHROPIC_API_KEY="<anthropic key>"
 ```
 
 ### Security and Validation Tips
@@ -1022,7 +1011,7 @@ except XiansServerError as e:
 ```python
 import asyncio
 from temporalio import activity
-from xians.platform.v1 import XiansPlatform, XiansOptions, TemporalConfig, LLMConfig
+from xians.platform.v1 import XiansPlatform, XiansOptions, TemporalConfig
 from xians.models.v1.server_contracts import (
     ChatOrDataRequest,
     UsageReportRequest,
@@ -1050,7 +1039,6 @@ async def main():
         server_url="https://api.xians.ai",
         api_key="your-api-key",
         temporal=TemporalConfig(host="localhost", port=7233),
-        llm=LLMConfig(provider="openai", model="gpt-4", api_key="your-openai-key"),
     )
     
     platform = await XiansPlatform.initialize(options)
@@ -1087,7 +1075,6 @@ async def client_example():
         server_url="https://api.xians.ai",
         api_key="your-api-key",
         temporal=TemporalConfig(host="localhost", port=7233),
-        llm=LLMConfig(provider="openai", model="gpt-4", api_key="your-openai-key"),
     )
     
     platform = await XiansPlatform.initialize(options)

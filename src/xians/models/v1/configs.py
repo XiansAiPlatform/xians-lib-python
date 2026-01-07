@@ -331,7 +331,12 @@ class XiansOptions(BaseModel):
         default=None,
         description="Temporal configuration (if None, fetch from server)",
     )
-    llm: LLMConfig | dict = Field(description="LLM configuration")
+    llm: LLMConfig | dict | None = Field(
+        default=None,
+        description="[DEPRECATED] LLM configuration. No longer used by the SDK. "
+        "Configure LLM in your activities instead.",
+        deprecated=True,
+    )
     log_level: str = Field(default="INFO", description="Logging level")
     enable_structured_logging: bool | str = Field(
         default=False,
@@ -428,6 +433,20 @@ class XiansOptions(BaseModel):
             raise ValueError("server_api_key is required when server_auth_mode is 'bearer_cert'")
         if self.server_auth_mode == "x_api_key" and not self.server_x_api_key:
             raise ValueError("server_x_api_key is required when server_auth_mode is 'x_api_key'")
+        return self
+
+    @model_validator(mode="after")
+    def warn_llm_deprecated(self) -> "XiansOptions":
+        """Warn users if they provide LLM config (deprecated)."""
+        if self.llm is not None:
+            import warnings
+            warnings.warn(
+                "The 'llm' parameter in XiansOptions is deprecated and no longer used by the SDK. "
+                "LLM configuration and invocation should be handled entirely in your activity implementation. "
+                "This parameter will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self
 
     @field_validator("log_level", mode="before")

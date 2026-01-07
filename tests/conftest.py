@@ -29,11 +29,10 @@ def sample_llm_config() -> LLMConfig:
 
 
 @pytest.fixture
-def sample_xians_options(sample_llm_config: LLMConfig) -> XiansOptions:
-    """Provide sample XiansOptions for testing."""
+def sample_xians_options() -> XiansOptions:
+    """Provide sample XiansOptions for testing (without LLM - no longer required)."""
     return XiansOptions(
         server_url="https://api.test.xians.ai",
         api_key=SecretStr("test-xians-api-key"),
-        llm=sample_llm_config,
         log_level="DEBUG",
     )

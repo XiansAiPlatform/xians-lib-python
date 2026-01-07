@@ -101,17 +101,31 @@ def test_llm_config_temperature_validation() -> None:
 
 
 @pytest.mark.unit
-def test_xians_options_valid(sample_llm_config: LLMConfig) -> None:
-    """Test XiansOptions with valid data."""
+def test_xians_options_valid() -> None:
+    """Test XiansOptions with valid data (without LLM - now optional)."""
     options = XiansOptions(
         server_url="https://api.xians.ai",
         api_key=SecretStr("sk-valid-api-key-123456"),
-        llm=sample_llm_config,
     )
 
     assert str(options.server_url) == "https://api.xians.ai/"
     assert options.server_api_key.get_secret_value() == "sk-valid-api-key-123456"
     assert options.log_level == "INFO"  # default
+    assert options.llm is None  # LLM is now optional
+
+
+@pytest.mark.unit
+def test_xians_options_with_deprecated_llm(sample_llm_config: LLMConfig) -> None:
+    """Test XiansOptions with LLM config (deprecated but still supported)."""
+    with pytest.warns(DeprecationWarning, match="llm.*deprecated"):
+        options = XiansOptions(
+            server_url="https://api.xians.ai",
+            api_key=SecretStr("sk-valid-api-key-123456"),
+            llm=sample_llm_config,
+        )
+
+    assert str(options.server_url) == "https://api.xians.ai/"
+    assert options.llm is not None  # Still accepted for backward compatibility
 
 
 @pytest.mark.unit
@@ -121,7 +135,6 @@ def test_xians_options_log_level_validation() -> None:
     options = XiansOptions(
         server_url="https://api.xians.ai",
         api_key=SecretStr("valid-api-key-12345"),
-        llm=LLMConfig(provider=LLMProvider.OPENAI, model="gpt-4"),
         log_level="debug",  # lowercase
     )
     assert options.log_level == "DEBUG"  # converted to uppercase
@@ -131,7 +144,6 @@ def test_xians_options_log_level_validation() -> None:
         XiansOptions(
             server_url="https://api.xians.ai",
             api_key=SecretStr("valid-api-key-12345"),
-            llm=LLMConfig(provider=LLMProvider.OPENAI, model="gpt-4"),
             log_level="INVALID",
         )
     assert "log_level must be one of" in str(exc_info.value)
