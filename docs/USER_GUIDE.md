@@ -4,6 +4,7 @@
 - [Overview](#overview)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Configuring the SDK](#configuring-the-sdk)
 - [Core Concepts](#core-concepts)
 - [Usage Examples](#usage-examples)
 - [API Reference](#api-reference)
@@ -137,26 +138,290 @@ python my_agent.py
 ### 3. Invoke Your Agent (from another script)
 
 ```python
-from xians.platform.v1 import XiansPlatform, AgentRequest
+import asyncio
+from datetime import timedelta
+from xians.platform.v1 import XiansPlatform, AgentRequest, XiansOptions, LLMConfig
+from xians.models.v1.configs import TemporalConfig
 
-# Connect as client (no workers)
-platform = await XiansPlatform.initialize(options)
-await platform.connect_temporal()
+async def main():
+    # Connect as client (no workers)
+    # Note: You can use simple strings - the SDK handles type conversion automatically
+    options = XiansOptions(
+        server_url="https://api.xians.ai",  # Plain string works!
+        api_key="<base64 bearer cert>",  # Plain string works!
+        temporal=TemporalConfig(address="localhost:7233", namespace="default"),
+        llm=LLMConfig(
+            provider="openai",  # Plain string works!
+            model="gpt-4o-mini",
+            api_key="<openai-key>",  # Plain string works!
+        ),
+    )
 
-client = platform.client()
+    platform = await XiansPlatform.initialize(options)
+    await platform.connect_temporal()
 
-# Invoke the agent
-response = await client.invoke(
-    workflow_id="unique-workflow-id",
-    task_queue="xians-default-user-EchoAgent-InvokeEcho",
-    request=AgentRequest(
-        agent_key="EchoAgent",
-        message="Hello, agent!",
+    client = platform.client()
+
+    # Invoke the agent
+    response = await client.invoke(
+        workflow_id="unique-workflow-id",
+        task_queue="xians-default-user-EchoAgent-InvokeEcho",
+        request=AgentRequest(
+            agent_key="EchoAgent",
+            message="Hello, agent!",
+        ),
+        timeout=timedelta(minutes=5),
+    )
+
+    print(response.text)  # Output: "Echo: Hello, agent!"
+
+    await platform.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
+## Configuring the SDK
+
+This section explains how to configure the SDK using the Pydantic v2 models defined in `src/xians/models/v1/configs.py`. The central entry point is `XiansOptions`, which aggregates server, Temporal, and LLM settings.
+
+> **💡 Pro Tip:** You can use simple strings for most configuration fields! The SDK automatically converts plain strings to the appropriate types (`SecretStr`, `HttpUrl`, `LLMProvider` enums). This makes configuration more intuitive while maintaining type safety internally.
+
+### XiansOptions (Top-level)
+
+```python
+from xians.models.v1.configs import XiansOptions, TemporalConfig, LLMConfig
+
+# Simple string usage - SDK handles type conversion automatically!
+options = XiansOptions(
+    server_url="https://api.xians.ai",  # Plain string → HttpUrl
+    api_key="<base64-bearer-cert>",  # Plain string → SecretStr
+    server_auth_mode="bearer_cert",  # default
+    server_x_api_key=None,
+    tenant_id="acme",
+    temporal=TemporalConfig(
+        address="temporal.example.com:7233",
+        namespace="prod",
+        task_queue="xians-agents",
+    ),
+    llm=LLMConfig(
+        provider="openai",  # Plain string → LLMProvider enum
+        model="gpt-4o-mini",
+        api_key="<openai-key>",  # Plain string → SecretStr
+        api_base="https://api.openai.com/v1",  # Plain string → HttpUrl
+        temperature=0.7,
+        max_tokens=2048,
+        timeout_seconds=60,
+        extra_params={"top_p": 0.9},
+    ),
+    log_level="INFO",
+    enable_structured_logging=False,
+)
+```
+
+Key behaviors:
+- `server_auth_mode` supports `"bearer_cert"` (default) and `"x_api_key"` with case-insensitive normalization.
+- `api_key` is an alias for `server_api_key` and is stored as `SecretStr`.
+- Validation rejects empty or obviously placeholder credentials.
+- `log_level` is normalized to uppercase and must be one of `DEBUG, INFO, WARNING, ERROR, CRITICAL`.
+
+### TemporalConfig
+
+```python
+from xians.models.v1.configs import TemporalConfig, TemporalTLSConfig
+
+temporal_cfg = TemporalConfig(
+    # You can specify address directly
+    address="localhost:7233",
+    namespace="default",
+    task_queue="xians-agents",
+
+    # Or use backward-compatible host/port
+    host="localhost",
+    port=7233,
+
+    # Optional TLS
+    tls=TemporalTLSConfig(
+        enabled=True,
+        root_ca_path="/etc/ssl/certs/ca.pem",
+        # For mTLS, provide both cert and key (pair validation enforced)
+        client_cert_path="/etc/ssl/certs/client.crt",
+        client_key_path="/etc/ssl/private/client.key",
+        domain="temporal.example.com",  # SNI override
+        pem_is_base64=False,
     ),
 )
-
-print(response.text)  # Output: "Echo: Hello, agent!"
 ```
+
+Important:
+- If `address` is not provided but `host` is, it composes `address` as `host:port` (default port `7233`).
+- Legacy TLS fields from older configs are automatically migrated into `tls` when present.
+- mTLS requires both client certificate and private key; validation will raise if one is missing.
+
+### TemporalTLSConfig
+
+```python
+from xians.models.v1.configs import TemporalTLSConfig
+
+tls_cfg = TemporalTLSConfig(
+    enabled=True,  # inferred True if any TLS material is present
+    root_ca_pem="<PEM string>",
+    client_cert_pem="<PEM string>",
+    client_key_pem="<PEM string>",
+    domain="temporal.example.com",
+    pem_is_base64=True,  # if your PEM inputs are base64-encoded blobs
+)
+```
+
+Notes:
+- Set `pem_is_base64=True` when passing base64-encoded PEM strings; the SDK will decode before use.
+- You may mix `*_pem` and `*_path` forms. If any TLS material is provided, `enabled` is inferred `True`.
+
+### LLMConfig
+
+```python
+from xians.models.v1.configs import LLMConfig
+
+# Simple string usage - SDK handles type conversion
+llm_cfg = LLMConfig(
+    provider="openai",  # Plain string → LLMProvider enum
+    model="gpt-4o",
+    api_key="<provider key>",  # Plain string → SecretStr
+    api_base="https://api.openai.com/v1",  # Plain string → HttpUrl
+    temperature=0.3,
+    max_tokens=1024,
+    timeout_seconds=30,
+    extra_params={"frequency_penalty": 0.2},
+)
+```
+
+Validation:
+- `temperature` must be between `0.0` and `2.0`.
+- `max_tokens >= 1`, `timeout_seconds >= 1`.
+- `extra_params` lets you pass provider-specific options (e.g., `top_p`, penalties).
+- The `provider` field accepts plain strings and converts them to `LLMProvider` enum automatically (case-insensitive).
+
+### XiansServerConfig (optional direct use)
+
+While `XiansOptions` is the primary entry point, some advanced scenarios use `XiansServerConfig` directly.
+
+```python
+from xians.models.v1.configs import XiansServerConfig
+
+# Simple string usage - SDK handles type conversion
+server_cfg = XiansServerConfig(
+    server_url="https://api.xians.ai",  # Plain string → HttpUrl
+    auth_mode="bearer_cert",  # or "x_api_key"
+    api_key="<base64 cert>",  # Plain string → SecretStr (alias for bearer_cert_base64)
+    x_api_key=None,
+    tenant_id="acme",
+    timeout_seconds=30,
+    retry_attempts=3,
+    verify_ssl=True,
+)
+```
+
+Validation:
+- `auth_mode` requires the corresponding credential (`bearer_cert_base64` or `x_api_key`).
+- Secrets are validated for non-empty and minimum length; placeholder-looking values are rejected.
+
+### Configuration via Environment Variables
+
+You can externalize secrets and settings using environment variables with a small wrapper around `XiansOptions`. We recommend `pydantic-settings` for enterprise apps.
+
+```python
+from pydantic_settings import BaseSettings
+from pydantic import SecretStr, AnyUrl
+from xians.models.v1.configs import XiansOptions, TemporalConfig, TemporalTLSConfig, LLMConfig
+
+class AppSettings(BaseSettings):
+    server_url: AnyUrl
+    api_key: SecretStr | None = None
+    server_auth_mode: str = "bearer_cert"
+    server_x_api_key: SecretStr | None = None
+    tenant_id: str | None = None
+
+    temporal_address: str | None = None
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "xians-agents"
+
+    temporal_tls_enabled: bool = False
+    temporal_tls_root_ca_path: str | None = None
+    temporal_tls_client_cert_path: str | None = None
+    temporal_tls_client_key_path: str | None = None
+    temporal_tls_domain: str | None = None
+
+    llm_provider: str
+    llm_model: str
+    llm_api_key: SecretStr | None = None
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 1024
+    llm_timeout_seconds: int = 30
+
+    class Config:
+        env_prefix = "XIANS_"
+        case_sensitive = False
+
+settings = AppSettings()  # loads from env
+
+options = XiansOptions(
+    server_url=settings.server_url,
+    api_key=settings.api_key,
+    server_auth_mode=settings.server_auth_mode,
+    server_x_api_key=settings.server_x_api_key,
+    tenant_id=settings.tenant_id,
+    temporal=TemporalConfig(
+        address=settings.temporal_address or "localhost:7233",
+        namespace=settings.temporal_namespace,
+        task_queue=settings.temporal_task_queue,
+        tls=TemporalTLSConfig(
+            enabled=settings.temporal_tls_enabled,
+            root_ca_path=settings.temporal_tls_root_ca_path,
+            client_cert_path=settings.temporal_tls_client_cert_path,
+            client_key_path=settings.temporal_tls_client_key_path,
+            domain=settings.temporal_tls_domain,
+        ) if settings.temporal_tls_enabled else None,
+    ),
+    llm=LLMConfig(
+        provider=settings.llm_provider,
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+        timeout_seconds=settings.llm_timeout_seconds,
+    ),
+)
+```
+
+Example environment variables:
+
+```bash
+export XIANS_SERVER_URL="https://api.xians.ai"
+export XIANS_API_KEY="<base64 bearer cert>"
+export XIANS_SERVER_AUTH_MODE="bearer_cert"
+export XIANS_TENANT_ID="acme"
+
+export XIANS_TEMPORAL_ADDRESS="temporal.example.com:7233"
+export XIANS_TEMPORAL_NAMESPACE="prod"
+export XIANS_TEMPORAL_TASK_QUEUE="xians-agents"
+
+export XIANS_LLM_PROVIDER="openai"
+export XIANS_LLM_MODEL="gpt-4o"
+export XIANS_LLM_API_KEY="<openai key>"
+export XIANS_LLM_TEMPERATURE="0.5"
+export XIANS_LLM_MAX_TOKENS="2048"
+export XIANS_LLM_TIMEOUT_SECONDS="60"
+```
+
+### Security and Validation Tips
+
+- Never hardcode secrets in source code. Load via environment variables or secret managers.
+- `XiansOptions` and `XiansServerConfig` validate secrets and reject placeholders.
+- Prefer using TLS for Temporal connections in production; enable mTLS when possible.
+- Ensure `verify_ssl=True` when calling the Xians Server.
+- Keep `log_level` appropriate for production (typically `INFO` or `WARNING`).
 
 ---
 

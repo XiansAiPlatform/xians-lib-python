@@ -1,7 +1,6 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator
-from pydantic import FieldValidationInfo, model_validator
+from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator, model_validator
 
 from ...constants.v1.core import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
@@ -149,10 +148,10 @@ class TemporalConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Configuration for LLM provider."""
 
-    provider: LLMProvider = Field(description="LLM provider name")
+    provider: str | LLMProvider = Field(description="LLM provider name")
     model: str = Field(description="Model identifier")
-    api_key: SecretStr | None = Field(default=None, description="API key for provider")
-    api_base: HttpUrl | None = Field(default=None, description="Custom API base URL")
+    api_key: str | SecretStr | None = Field(default=None, description="API key for provider")
+    api_base: str | HttpUrl | None = Field(default=None, description="Custom API base URL")
     temperature: float = Field(
         default=DEFAULT_LLM_TEMPERATURE,
         description="Sampling temperature",
@@ -176,11 +175,49 @@ class LLMConfig(BaseModel):
 
     model_config = {"frozen": False}
 
+    @field_validator("provider", mode="before")
+    @classmethod
+    def coerce_provider(cls, v: str | LLMProvider) -> LLMProvider:
+        """Convert string to LLMProvider enum."""
+        if isinstance(v, LLMProvider):
+            return v
+        if isinstance(v, str):
+            # Try to match by value (case-insensitive)
+            v_lower = v.strip().lower()
+            for member in LLMProvider:
+                if member.value.lower() == v_lower:
+                    return member
+            # If no match, let Pydantic handle the error
+            return LLMProvider(v)
+        return v
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def coerce_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
+        """Convert plain string to SecretStr."""
+        if v is None:
+            return None
+        if isinstance(v, SecretStr):
+            return v
+        return SecretStr(str(v).strip()) if str(v).strip() else None
+
+    @field_validator("api_base", mode="before")
+    @classmethod
+    def coerce_api_base(cls, v: str | HttpUrl | None) -> HttpUrl | None:
+        """Convert plain string to HttpUrl."""
+        if v is None:
+            return None
+        if isinstance(v, HttpUrl):
+            return v
+        # Convert string to HttpUrl (Pydantic will handle validation)
+        from pydantic import TypeAdapter
+        return TypeAdapter(HttpUrl).validate_python(v)
+
 
 class XiansServerConfig(BaseModel):
     """Configuration for Xians server connection."""
 
-    server_url: HttpUrl = Field(description="Xians server base URL")
+    server_url: str | HttpUrl = Field(description="Xians server base URL")
     auth_mode: Literal["bearer_cert", "x_api_key"] = Field(
         default="bearer_cert",
         description="Authentication mode for server requests",
@@ -208,6 +245,26 @@ class XiansServerConfig(BaseModel):
     verify_ssl: bool = Field(default=True, description="Verify SSL certificates")
 
     model_config = {"frozen": False, "populate_by_name": True}
+
+    @field_validator("server_url", mode="before")
+    @classmethod
+    def coerce_server_url(cls, v: str | HttpUrl) -> HttpUrl:
+        """Allow plain string URLs to be converted to HttpUrl."""
+        if isinstance(v, HttpUrl):
+            return v
+        # Convert string to HttpUrl (Pydantic will handle validation)
+        from pydantic import TypeAdapter
+        return TypeAdapter(HttpUrl).validate_python(v)
+
+    @field_validator("bearer_cert_base64", "x_api_key", mode="before")
+    @classmethod
+    def coerce_secret_str_fields(cls, v: str | SecretStr | None) -> SecretStr | None:
+        """Convert plain strings to SecretStr."""
+        if v is None:
+            return None
+        if isinstance(v, SecretStr):
+            return v
+        return SecretStr(str(v).strip()) if str(v).strip() else None
 
     @field_validator("bearer_cert_base64", "x_api_key")
     @classmethod
@@ -255,8 +312,9 @@ class XiansOptions(BaseModel):
     This is the primary configuration object users provide when initializing the SDK.
     """
 
-    server_url: HttpUrl = Field(description="Xians server base URL")
-    server_api_key: SecretStr | None = Field(
+    server_url: str | HttpUrl = Field(description="Xians server base URL")
+    server_api_key: str | SecretStr | None = Field(
+        default=None,
         description="Base64-encoded certificate used for server authentication",
         alias="api_key",
     )
@@ -264,7 +322,7 @@ class XiansOptions(BaseModel):
         default="bearer_cert",
         description="Authentication mode for server requests",
     )
-    server_x_api_key: SecretStr | None = Field(
+    server_x_api_key: str | SecretStr | None = Field(
         default=None,
         description="Legacy X-API-Key credential for auth_mode='x_api_key'",
     )
@@ -273,14 +331,24 @@ class XiansOptions(BaseModel):
         default=None,
         description="Temporal configuration (if None, fetch from server)",
     )
-    llm: LLMConfig = Field(description="LLM configuration")
+    llm: LLMConfig | dict = Field(description="LLM configuration")
     log_level: str = Field(default="INFO", description="Logging level")
-    enable_structured_logging: bool = Field(
+    enable_structured_logging: bool | str = Field(
         default=False,
         description="Enable structured logging with structlog",
     )
 
     model_config = {"frozen": False, "populate_by_name": True}
+
+    @field_validator("server_url", mode="before")
+    @classmethod
+    def coerce_server_url(cls, v: str | HttpUrl) -> HttpUrl:
+        """Allow plain string URLs to be converted to HttpUrl."""
+        if isinstance(v, HttpUrl):
+            return v
+        # Convert string to HttpUrl (Pydantic will handle validation)
+        from pydantic import TypeAdapter
+        return TypeAdapter(HttpUrl).validate_python(v)
 
     # Coerce auth mode from string (case-insensitive)
     @field_validator("server_auth_mode", mode="before")
@@ -292,39 +360,11 @@ class XiansOptions(BaseModel):
                 return val
         return v
 
-    # Convert api keys from plain strings to SecretStr
-    @field_validator("server_api_key", "server_x_api_key", mode="before")
-    @classmethod
-    def coerce_secret_str(cls, v: str | SecretStr | None) -> SecretStr | None:
-        if v is None:
-            return None
-        if isinstance(v, SecretStr):
-            return v
-        s = str(v).strip()
-        return SecretStr(s) if s else None
-
-    # Coerce enable_structured_logging from string to bool
-    @field_validator("enable_structured_logging", mode="before")
-    @classmethod
-    def coerce_bool(cls, v: bool | str | None) -> bool:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return False
-        s = str(v).strip().lower()
-        truthy = {"true", "1", "yes", "y", "on"}
-        falsy = {"false", "0", "no", "n", "off"}
-        if s in truthy:
-            return True
-        if s in falsy:
-            return False
-        # default to False for unknown strings
-        return False
-
+    # Convert and validate server_api_key
     @field_validator("server_api_key", mode="before")
     @classmethod
     def validate_server_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
-        """Validate server API key (base64 certificate) to catch common mistakes."""
+        """Convert and validate server API key (base64 certificate) to catch common mistakes."""
         if v is None:
             return None
         if isinstance(v, SecretStr):
@@ -352,6 +392,35 @@ class XiansOptions(BaseModel):
                     "Please replace with your actual API key."
                 )
         return SecretStr(key_value)
+
+    # Convert server_x_api_key from plain strings to SecretStr
+    @field_validator("server_x_api_key", mode="before")
+    @classmethod
+    def coerce_server_x_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
+        if v is None:
+            return None
+        if isinstance(v, SecretStr):
+            return v
+        s = str(v).strip()
+        return SecretStr(s) if s else None
+
+    # Coerce enable_structured_logging from string to bool
+    @field_validator("enable_structured_logging", mode="before")
+    @classmethod
+    def coerce_bool(cls, v: bool | str | None) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        truthy = {"true", "1", "yes", "y", "on"}
+        falsy = {"false", "0", "no", "n", "off"}
+        if s in truthy:
+            return True
+        if s in falsy:
+            return False
+        # default to False for unknown strings
+        return False
 
     @model_validator(mode="after")
     def validate_server_auth_mode(self) -> "XiansOptions":
