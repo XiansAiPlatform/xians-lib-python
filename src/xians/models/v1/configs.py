@@ -282,6 +282,45 @@ class XiansOptions(BaseModel):
 
     model_config = {"frozen": False, "populate_by_name": True}
 
+    # Coerce auth mode from string (case-insensitive)
+    @field_validator("server_auth_mode", mode="before")
+    @classmethod
+    def normalize_auth_mode(cls, v: str | Literal["bearer_cert", "x_api_key"]) -> str:
+        if isinstance(v, str):
+            val = v.strip().lower().replace("-", "_")
+            if val in {"bearer_cert", "x_api_key"}:
+                return val
+        return v
+
+    # Convert api keys from plain strings to SecretStr
+    @field_validator("server_api_key", "server_x_api_key", mode="before")
+    @classmethod
+    def coerce_secret_str(cls, v: str | SecretStr | None) -> SecretStr | None:
+        if v is None:
+            return None
+        if isinstance(v, SecretStr):
+            return v
+        s = str(v).strip()
+        return SecretStr(s) if s else None
+
+    # Coerce enable_structured_logging from string to bool
+    @field_validator("enable_structured_logging", mode="before")
+    @classmethod
+    def coerce_bool(cls, v: bool | str | None) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        truthy = {"true", "1", "yes", "y", "on"}
+        falsy = {"false", "0", "no", "n", "off"}
+        if s in truthy:
+            return True
+        if s in falsy:
+            return False
+        # default to False for unknown strings
+        return False
+
     @field_validator("server_api_key", mode="before")
     @classmethod
     def validate_server_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
@@ -321,6 +360,11 @@ class XiansOptions(BaseModel):
         if self.server_auth_mode == "x_api_key" and not self.server_x_api_key:
             raise ValueError("server_x_api_key is required when server_auth_mode is 'x_api_key'")
         return self
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, v: str) -> str:
+        return str(v).strip().upper()
 
     @field_validator("log_level")
     @classmethod

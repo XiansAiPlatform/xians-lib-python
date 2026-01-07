@@ -182,14 +182,26 @@ class WorkerHost:
         activities: list[Callable] | None = None,
         workers_per_queue: int = 1,
     ) -> None:
+        # Temporal does not allow multiple workers with overlapping task types on the same
+        # namespace/task queue/build ID within the same process. Enforce a single worker per queue.
+        if workers_per_queue > 1:
+            logger.warning(
+                "Multiple workers per task queue in the same process are not supported. "
+                "Creating a single worker per queue. Use max_concurrent_activities to scale activity concurrency, "
+                "or run additional workers in separate processes."
+            )
         for task_queue in task_queues:
-            for i in range(workers_per_queue):
-                await self.start_worker(
-                    task_queue=task_queue,
-                    workflows=workflows,
-                    activities=activities,
-                )
-                logger.debug(f"Started worker {i+1}/{workers_per_queue} for queue {task_queue}")
+            # Avoid duplicate worker creation for the same queue
+            existing = [w for w in self.workers if w.task_queue == task_queue]
+            if existing:
+                logger.debug(f"Worker for task queue '{task_queue}' already exists; skipping creation.")
+                continue
+            await self.start_worker(
+                task_queue=task_queue,
+                workflows=workflows,
+                activities=activities,
+            )
+            logger.debug(f"Started worker 1/1 for queue {task_queue}")
 
     async def shutdown(self) -> None:
         logger.info(f"Shutting down {len(self.workers)} workers...")

@@ -665,19 +665,104 @@ XiansOptions(
 )
 ```
 
-### Debug Mode
+### Temporal TLS Configuration (Private CA, mTLS, SNI)
 
-Enable debug logging:
+The Python SDK supports secure connections to Temporal using TLS, including:
+- Public CA TLS
+- Private CA TLS (custom root CA)
+- Mutual TLS (client certificate + private key)
+- SNI/domain override (certificate hostname mismatch)
+
+### Config models
+
+Use `TemporalConfig` with nested `TemporalTLSConfig`:
+- `address`: "host:port"
+- `namespace`: Temporal namespace
+- `tls.enabled`: enable TLS (auto-inferred if any TLS field is provided)
+- `tls.root_ca_pem` or `tls.root_ca_path`: custom Root CA (PEM string or file path)
+- `tls.client_cert_pem` / `tls.client_cert_path`: client certificate (PEM or path)
+- `tls.client_key_pem` / `tls.client_key_path`: client private key (PEM or path)
+- `tls.domain`: SNI override when certificate hostname differs from target address
+- `tls.pem_is_base64`: set True if PEM strings are base64-encoded
+
+### Examples
+
+Private CA + SNI override:
+
 ```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
+from xians.models.v1.configs import TemporalConfig, TemporalTLSConfig
+
+temporal = TemporalConfig(
+    address="temporal.mycorp.internal:7233",
+    namespace="default",
+    tls=TemporalTLSConfig(
+        root_ca_path="/etc/ssl/mycorp-root-ca.pem",
+        domain="temporal.mycorp.internal",
+    ),
+)
 ```
 
-### Getting Help
+Mutual TLS (client cert + key) with private CA:
 
-- 📖 Documentation: `docs/`
-- 💬 GitHub Issues: [Report issues](https://github.com/xians-platform/xians-lib-python/issues)
-- 📧 Email: info@xians.ai
+```python
+temporal = TemporalConfig(
+    address="temporal.mycorp.internal:7233",
+    namespace="default",
+    tls=TemporalTLSConfig(
+        root_ca_path="/etc/ssl/mycorp-root-ca.pem",
+        client_cert_path="/etc/ssl/client.crt",
+        client_key_path="/etc/ssl/client.key",
+        domain="temporal.mycorp.internal",
+    ),
+)
+```
+
+Base64 PEM inputs (from server or environment):
+
+```python
+import os
+
+temporal = TemporalConfig(
+    address=os.getenv("XIANS_TEMPORAL_ADDRESS", "temporal.mycorp.internal:7233"),
+    namespace=os.getenv("XIANS_TEMPORAL_NAMESPACE", "default"),
+    tls=TemporalTLSConfig(
+        root_ca_pem=os.getenv("XIANS_TEMPORAL_TLS_ROOT_CA_PEM"),
+        client_cert_pem=os.getenv("XIANS_TEMPORAL_TLS_CLIENT_CERT_PEM"),
+        client_key_pem=os.getenv("XIANS_TEMPORAL_TLS_CLIENT_KEY_PEM"),
+        pem_is_base64=True,
+        domain=os.getenv("XIANS_TEMPORAL_TLS_DOMAIN"),
+    ),
+)
+```
+
+### Server-provided settings
+
+If you do not pass `XiansOptions.temporal`, the SDK will fetch Temporal settings from Xians Server and build a `TemporalConfig` automatically. Supported server fields:
+- `flowServerUrl` (or `TEMPORAL_SERVER_URL` env override)
+- `flowServerNamespace`
+- `flowServerRootCaPem` (optional)
+- `flowServerCertBase64` (optional, client cert)
+- `flowServerPrivateKeyBase64` (optional, client key)
+- `flowServerDomainOverride` / `flowServerSniDomain` (optional)
+
+The SDK logs a summary of TLS presence (enabled, root CA provided, mTLS provided, domain override) without logging sensitive material.
+
+### Troubleshooting UnknownIssuer / SNI
+
+If you see `InvalidCertificate(UnknownIssuer)` or `CERTIFICATE_VERIFY_FAILED`:
+- Provide a private Root CA via `TemporalTLSConfig.root_ca_pem` or `root_ca_path`.
+- If the certificate hostname doesn’t match the address, set `TemporalTLSConfig.domain` to the certificate’s CN/SAN.
+- If the server requires mutual TLS, set BOTH `client_cert_*` and `client_key_*`.
+- Ensure PEM values are correct (BEGIN/END blocks) and files are readable with proper permissions.
+
+The SDK error message includes:
+- target address and namespace
+- TLS enabled, root CA provided, mTLS provided, domain override
+- actionable hints based on the underlying error
+
+### Security note
+
+Do NOT skip TLS verification unless explicitly directed by your security policy. The SDK does not disable verification by default and does not provide a "skip verify" option.
 
 ---
 
@@ -691,4 +776,3 @@ logging.basicConfig(level=logging.DEBUG)
 ---
 
 **Happy Building! 🚀**
-
