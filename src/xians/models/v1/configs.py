@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator
 from pydantic import FieldValidationInfo, model_validator
@@ -12,43 +12,138 @@ from ...constants.v1.core import (
 )
 
 
-class TemporalConfig(BaseModel):
-    """Configuration for Temporal connection."""
+class TemporalTLSConfig(BaseModel):
+    """TLS configuration for Temporal connections.
 
-    host: str = Field(default="localhost", description="Temporal server host")
-    port: int = Field(default=7233, description="Temporal server port", ge=1, le=65535)
-    namespace: str = Field(default="default", description="Temporal namespace")
-    task_queue: str = Field(default="xians-agents", description="Task queue name")
-    tls_enabled: bool = Field(default=False, description="Enable TLS connection")
-    tls_cert_path: str | None = Field(default=None, description="Path to TLS certificate")
-    server_root_ca_cert_base64: SecretStr | None = Field(
-        default=None,
-        description="Base64-encoded server root CA certificate",
-    )
-    client_cert_base64: SecretStr | None = Field(
-        default=None,
-        description="Base64-encoded client certificate for mTLS",
-    )
-    client_private_key_base64: SecretStr | None = Field(
-        default=None,
-        description="Base64-encoded client private key for mTLS",
-    )
+    Supports both file-path and PEM-string options, base64 decoding, and SNI override.
+    """
+
+    enabled: bool = Field(default=False, description="Enable TLS. Inferred True if any TLS fields are set.")
+    root_ca_pem: Optional[str] = Field(default=None, description="Root CA certificate PEM string")
+    root_ca_path: Optional[str] = Field(default=None, description="Path to Root CA certificate PEM file")
+    client_cert_pem: Optional[str] = Field(default=None, description="Client certificate PEM string for mTLS")
+    client_cert_path: Optional[str] = Field(default=None, description="Path to client certificate PEM file for mTLS")
+    client_key_pem: Optional[str] = Field(default=None, description="Client private key PEM string for mTLS")
+    client_key_path: Optional[str] = Field(default=None, description="Path to client private key PEM file for mTLS")
+    domain: Optional[str] = Field(default=None, description="SNI override: server name/certificate hostname")
+    pem_is_base64: bool = Field(default=False, description="Decode provided *_pem fields from base64 before use")
 
     model_config = {"frozen": False, "populate_by_name": True}
 
-    @field_validator("client_cert_base64", "client_private_key_base64")
-    @classmethod
-    def validate_mtls_pairs(
-        cls, v: SecretStr | None, info: FieldValidationInfo
-    ) -> SecretStr | None:
-        """Ensure mTLS cert/key are provided together when either is set."""
-        cert = v if v else info.data.get("client_cert_base64")
-        key = v if v else info.data.get("client_private_key_base64")
-        if cert and not key:
-            raise ValueError("client_private_key_base64 must be set when client_cert_base64 is provided")
-        if key and not cert:
-            raise ValueError("client_cert_base64 must be set when client_private_key_base64 is provided")
-        return v
+    @model_validator(mode="after")
+    def validate_tls_enabled_and_pairs(self) -> "TemporalTLSConfig":
+        """Infer enabled flag and validate mTLS pairs."""
+        any_material = any(
+            [
+                self.root_ca_pem,
+                self.root_ca_path,
+                self.client_cert_pem,
+                self.client_cert_path,
+                self.client_key_pem,
+                self.client_key_path,
+            ]
+        )
+        if any_material:
+            self.enabled = True
+        # mTLS pair validation
+        has_cert = bool(self.client_cert_pem or self.client_cert_path)
+        has_key = bool(self.client_key_pem or self.client_key_path)
+        if has_cert != has_key:
+            raise ValueError(
+                "mTLS requires both client cert and private key. Provide client_cert_* and client_key_*."
+            )
+        return self
+
+
+class TemporalConfig(BaseModel):
+    """Configuration for Temporal connection."""
+
+    address: str = Field(default="localhost:7233", description="Temporal server address 'host:port'")
+    namespace: str = Field(default="default", description="Temporal namespace")
+    task_queue: str = Field(default="xians-agents", description="Task queue name")
+    tls: TemporalTLSConfig | None = Field(default=None, description="TLS configuration for Temporal")
+
+    # Backward compatibility fields (deprecated): host/port/tls_*; allow populate_by_name
+    host: str | None = Field(default=None, description="[Deprecated] Temporal server host")
+    port: int | None = Field(default=None, description="[Deprecated] Temporal server port", ge=1, le=65535)
+    tls_enabled: bool = Field(default=False, description="[Deprecated] Use tls.enabled")
+    tls_cert_path: str | None = Field(default=None, description="[Deprecated] Use tls.root_ca_path")
+    server_root_ca_cert_base64: SecretStr | None = Field(default=None, description="[Deprecated]")
+    client_cert_base64: SecretStr | None = Field(default=None, description="[Deprecated]")
+    client_private_key_base64: SecretStr | None = Field(default=None, description="[Deprecated]")
+
+    model_config = {"frozen": False, "populate_by_name": True}
+
+    @model_validator(mode="before")
+    def compose_address(cls, values: dict) -> dict:
+        """Compose address from host/port if not provided to keep backward compatibility."""
+        address = values.get("address")
+        host = values.get("host")
+        port = values.get("port")
+        if not address and host:
+            if port:
+                values["address"] = f"{host}:{port}"
+            else:
+                # Default Temporal port 7233 if not provided
+                values["address"] = f"{host}:7233"
+        return values
+
+    @model_validator(mode="after")
+    def populate_legacy_host_port(self) -> "TemporalConfig":
+        """Populate legacy host/port fields from address if missing to satisfy backward compatibility tests."""
+        try:
+            if (self.host is None or self.port is None) and self.address:
+                # Parse address into host and port
+                addr = self.address
+                # Remove scheme if any (not expected but defensive)
+                if "://" in addr:
+                    addr = addr.split("://", 1)[1]
+                parts = addr.split(":")
+                if len(parts) == 2:
+                    self.host = self.host or parts[0]
+                    try:
+                        self.port = self.port or int(parts[1])
+                    except ValueError:
+                        # If port not int, default to 7233
+                        self.port = self.port or 7233
+                else:
+                    # No explicit port; default
+                    self.host = self.host or addr
+                    self.port = self.port or 7233
+        except Exception:
+            # Do not raise; keep fields as-is
+            pass
+        return self
+
+    @model_validator(mode="after")
+    def migrate_legacy_tls(self) -> "TemporalConfig":
+        """Map legacy TLS fields into nested TemporalTLSConfig when needed."""
+        if self.tls is None:
+            any_legacy = any(
+                [
+                    self.tls_enabled,
+                    self.tls_cert_path,
+                    self.server_root_ca_cert_base64,
+                    self.client_cert_base64,
+                    self.client_private_key_base64,
+                ]
+            )
+            if any_legacy:
+                tls = TemporalTLSConfig()
+                tls.enabled = bool(self.tls_enabled)
+                if self.tls_cert_path:
+                    tls.root_ca_path = self.tls_cert_path
+                if self.server_root_ca_cert_base64:
+                    tls.root_ca_pem = self.server_root_ca_cert_base64.get_secret_value()
+                    tls.pem_is_base64 = True
+                if self.client_cert_base64:
+                    tls.client_cert_pem = self.client_cert_base64.get_secret_value()
+                    tls.pem_is_base64 = True
+                if self.client_private_key_base64:
+                    tls.client_key_pem = self.client_private_key_base64.get_secret_value()
+                    tls.pem_is_base64 = True
+                self.tls = tls
+        return self
 
 
 class LLMConfig(BaseModel):
@@ -239,6 +334,7 @@ class XiansOptions(BaseModel):
 
 
 __all__ = [
+    "TemporalTLSConfig",
     "TemporalConfig",
     "LLMConfig",
     "XiansServerConfig",

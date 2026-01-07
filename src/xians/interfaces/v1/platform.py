@@ -12,6 +12,7 @@ from ...middleware.v1 import (
     initialize_middleware,
 )
 from ...models.v1.configs import TemporalConfig, XiansOptions, XiansServerConfig
+from ...models.v1.configs import TemporalTLSConfig
 from ...models.v1.entities import AgentDefinition, WorkflowDefinition
 from ...temporal_workflows.v1.worker_runner import WorkerHost, WorkerRegistry
 from ...temporal_workflows.v1.workflows import ConversationWorkflow, InvokeAgentWorkflow
@@ -188,7 +189,7 @@ class XiansPlatform:
         server_config = XiansServerConfig(
             server_url=options.server_url,
             auth_mode=options.server_auth_mode,
-            bearer_cert_base64=options.server_api_key,
+            api_key=options.server_api_key,
             x_api_key=options.server_x_api_key,
             tenant_id=options.tenant_id,
         )
@@ -200,7 +201,24 @@ class XiansPlatform:
             try:
                 settings = await xians_client.fetch_temporal_settings()
                 temporal_config = cls._build_temporal_config_from_settings(settings)
-                logger.info(f"Using Temporal at {temporal_config.host}:{temporal_config.port}")
+                logger.info(f"Using Temporal at {temporal_config.address}")
+                # Debug TLS summary without sensitive contents
+                tls = temporal_config.tls
+                tls_enabled = bool(tls and (tls.enabled or any([
+                    tls.root_ca_pem,
+                    tls.root_ca_path,
+                    tls.client_cert_pem,
+                    tls.client_cert_path,
+                    tls.client_key_pem,
+                    tls.client_key_path,
+                ])))
+                root_ca_provided = bool(tls and (tls.root_ca_pem or tls.root_ca_path))
+                mtls_provided = bool(tls and ((tls.client_cert_pem or tls.client_cert_path) and (tls.client_key_pem or tls.client_key_path)))
+                domain_override = tls.domain if tls else None
+                logger.debug(
+                    f"Temporal settings: namespace={temporal_config.namespace}, tls_enabled={tls_enabled}, "
+                    f"root_ca_provided={root_ca_provided}, mtls_provided={mtls_provided}, domain_override={domain_override}"
+                )
             except Exception as e:
                 raise ConfigurationError(
                     "Failed to fetch Temporal settings from Xians Server",
@@ -374,17 +392,38 @@ class XiansPlatform:
         port = parsed.port or 7233
         namespace = str(settings.get("flowServerNamespace") or settings.get("namespace") or "default")
 
-        tls_enabled = bool(settings.get("flowServerCertBase64") or settings.get("flowServerPrivateKeyBase64"))
+        # TLS materials may be provided as base64 or raw PEM
+        flow_server_cert_b64 = settings.get("flowServerCertBase64")
+        flow_server_key_b64 = settings.get("flowServerPrivateKeyBase64")
+        flow_server_ca_pem = settings.get("flowServerRootCaPem")
+        flow_server_domain = settings.get("flowServerDomainOverride") or settings.get("flowServerSniDomain")
 
+        tls_enabled = bool(flow_server_cert_b64 or flow_server_key_b64 or flow_server_ca_pem)
+
+        # Build nested TLS config
+        tls_cfg = None
+        if tls_enabled:
+            tls_cfg = TemporalTLSConfig(
+                enabled=True,
+                root_ca_pem=str(flow_server_ca_pem) if flow_server_ca_pem else None,
+                client_cert_pem=str(flow_server_cert_b64) if flow_server_cert_b64 else None,
+                client_key_pem=str(flow_server_key_b64) if flow_server_key_b64 else None,
+                domain=str(flow_server_domain) if flow_server_domain else None,
+                pem_is_base64=bool(flow_server_cert_b64 or flow_server_key_b64),
+            )
+
+        # Preserve legacy fields for backward compatibility (tests expect these)
         return TemporalConfig(
+            address=f"{host}:{port}",
+            namespace=namespace,
+            task_queue=str(settings.get("task_queue") or "xians-agents"),
+            tls=tls_cfg,
             host=host,
             port=port,
-            namespace=namespace,
-            task_queue=settings.get("task_queue", "xians-agents"),
             tls_enabled=tls_enabled,
-            server_root_ca_cert_base64=settings.get("flowServerCertBase64"),
-            client_cert_base64=settings.get("flowServerCertBase64"),
-            client_private_key_base64=settings.get("flowServerPrivateKeyBase64"),
+            server_root_ca_cert_base64=flow_server_cert_b64 if flow_server_ca_pem is None else None,
+            client_cert_base64=flow_server_cert_b64,
+            client_private_key_base64=flow_server_key_b64,
         )
 
 

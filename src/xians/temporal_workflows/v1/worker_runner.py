@@ -1,7 +1,6 @@
 """Temporal worker host and runner for Xians SDK v1."""
 
 import asyncio
-import base64
 import logging
 from typing import Any, Callable
 
@@ -9,7 +8,8 @@ from temporalio.client import Client, TLSConfig
 from temporalio.worker import Worker
 
 from ...exceptions.v1.errors import TemporalError
-from ...models.v1.configs import TemporalConfig
+from ...models.v1.configs import TemporalConfig, TemporalTLSConfig
+from .tls_utils import resolve_cert_bytes, TLSMaterialError
 
 logger = logging.getLogger(__name__)
 
@@ -41,37 +41,49 @@ class WorkerHost:
         self._workflows: list[type] = []
         self._activities: list[Callable] = []
 
+    def _build_temporal_tls_config(self, tls_cfg: TemporalTLSConfig | None) -> TLSConfig | None:
+        """Build Temporal TLSConfig from SDK TLS configuration.
+
+        Returns None if TLS config is not provided.
+        """
+        if not tls_cfg:
+            return None
+        # Determine if TLS should be enabled
+        any_material = any(
+            [
+                tls_cfg.root_ca_pem,
+                tls_cfg.root_ca_path,
+                tls_cfg.client_cert_pem,
+                tls_cfg.client_cert_path,
+                tls_cfg.client_key_pem,
+                tls_cfg.client_key_path,
+            ]
+        )
+        if not tls_cfg.enabled and not any_material:
+            return None
+
+        server_root = resolve_cert_bytes(tls_cfg.root_ca_pem, tls_cfg.root_ca_path, tls_cfg.pem_is_base64)
+        client_cert = resolve_cert_bytes(tls_cfg.client_cert_pem, tls_cfg.client_cert_path, tls_cfg.pem_is_base64)
+        client_key = resolve_cert_bytes(tls_cfg.client_key_pem, tls_cfg.client_key_path, tls_cfg.pem_is_base64)
+
+        # Validate mTLS pair
+        if (client_cert and not client_key) or (client_key and not client_cert):
+            raise TemporalError(
+                "mTLS requires both client cert and private key. Provide client_cert_* and client_key_*."
+            )
+
+        # Construct TLSConfig
+        return TLSConfig(
+            server_root_ca_cert=server_root,
+            client_cert=client_cert,
+            client_private_key=client_key,
+            domain=tls_cfg.domain,
+        )
+
     async def connect(self) -> None:
         try:
-            target = f"{self.config.host}:{self.config.port}"
-            tls_config = None
-            if self.config.tls_enabled:
-                server_root = (
-                    base64.b64decode(self.config.server_root_ca_cert_base64.get_secret_value())
-                    if self.config.server_root_ca_cert_base64
-                    else None
-                )
-                client_cert = (
-                    base64.b64decode(self.config.client_cert_base64.get_secret_value())
-                    if self.config.client_cert_base64
-                    else None
-                )
-                client_key = (
-                    base64.b64decode(self.config.client_private_key_base64.get_secret_value())
-                    if self.config.client_private_key_base64
-                    else None
-                )
-                if (client_cert and not client_key) or (client_key and not client_cert):
-                    raise TemporalError("Both client_cert_base64 and client_private_key_base64 must be provided for mTLS")
-                if not server_root and not client_cert and not client_key and self.config.tls_cert_path:
-                    with open(self.config.tls_cert_path, "rb") as f:
-                        server_root = f.read()
-
-                tls_config = TLSConfig(
-                    server_root_ca_cert=server_root,
-                    client_cert=client_cert,
-                    client_private_key=client_key,
-                )
+            target = self.config.address
+            tls_config = self._build_temporal_tls_config(self.config.tls)
 
             self.client = await Client.connect(
                 target,
@@ -83,11 +95,41 @@ class WorkerHost:
                 f"Connected to Temporal server at {target}, namespace: {self.config.namespace}"
             )
 
-        except Exception as e:
+        except TLSMaterialError as e:
             raise TemporalError(
-                f"Failed to connect to Temporal server: {str(e)}",
-                cause=e,
+                f"Failed to load TLS materials: {e}"
+            ) from e
+        except Exception as e:
+            # Actionable hints based on common TLS errors
+            tls = self.config.tls
+            tls_enabled = bool(tls and (tls.enabled or any([
+                tls.root_ca_pem,
+                tls.root_ca_path,
+                tls.client_cert_pem,
+                tls.client_cert_path,
+                tls.client_key_pem,
+                tls.client_key_path,
+            ])))
+            root_ca_provided = bool(tls and (tls.root_ca_pem or tls.root_ca_path))
+            mtls_provided = bool(tls and ((tls.client_cert_pem or tls.client_cert_path) and (tls.client_key_pem or tls.client_key_path)))
+            domain_override = tls.domain if tls else None
+
+            msg = (
+                f"Failed to connect to Temporal {self.config.address} (namespace={self.config.namespace}). "
+                f"TLS enabled={tls_enabled}, root_ca_provided={root_ca_provided}, mtls_provided={mtls_provided}, "
+                f"domain_override={domain_override}. Underlying error: {e}"
             )
+            err_str = str(e)
+            if "UnknownIssuer" in err_str or "CERTIFICATE_VERIFY_FAILED" in err_str:
+                msg += (
+                    " Hint: For private CA, provide TemporalConfig.tls.root_ca_pem or root_ca_path. "
+                    "If certificate hostname mismatch, set TemporalConfig.tls.domain. "
+                    "If server requires mTLS, set client_cert_* and client_key_*."
+                )
+            elif "hostname" in err_str or "SNI" in err_str:
+                msg += " Hint: Set TemporalConfig.tls.domain to the server certificate hostname."
+
+            raise TemporalError(msg, cause=e)
 
     def register_workflow(self, workflow_class: type) -> None:
         self._workflows.append(workflow_class)
