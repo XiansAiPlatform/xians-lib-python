@@ -4,7 +4,7 @@ Unit tests for constants and enums.
 
 import pytest
 
-from src.constants.v1.core import (
+from xians.constants.v1.core import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_TEMPERATURE,

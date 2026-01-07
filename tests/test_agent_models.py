@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from src.models.v1.entities import AgentRequest, AgentResponse
+from xians.models.v1.entities import AgentRequest, AgentResponse
 
 
 class TestAgentRequest:

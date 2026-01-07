@@ -5,15 +5,13 @@ Unit tests for Pydantic models.
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from src.constants.v1 import LLMProvider, MessageRole, WorkflowType
-from src.models.v1 import (
+from xians.constants.v1.core import LLMProvider, MessageRole, WorkflowType
+from xians.models.v1.configs import LLMConfig, TemporalConfig, XiansOptions
+from xians.models.v1.entities import (
     AgentDefinition,
-    LLMConfig,
     LLMMessage,
     LLMResponse,
-    TemporalConfig,
     WorkflowDefinition,
-    XiansOptions,
 )
 
 

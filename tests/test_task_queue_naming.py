@@ -1,8 +1,6 @@
 """Tests for task queue naming utilities."""
 
-import pytest
-
-from src.temporal_workflows.v1.worker_runner import build_task_queue_name
+from xians.temporal_workflows.v1 import build_task_queue_name
 
 
 class TestTaskQueueNaming:

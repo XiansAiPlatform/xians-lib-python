@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from src.utils.v1 import compute_hash, safe_dict_get, setup_logging
+from xians.utils.v1 import compute_hash, safe_dict_get, setup_logging
 
 
 @pytest.mark.unit

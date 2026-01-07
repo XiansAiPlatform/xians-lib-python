@@ -4,7 +4,7 @@ Unit tests for exception classes.
 
 import pytest
 
-from src.exceptions.v1 import (
+from xians.exceptions.v1 import (
     AuthenticationError,
     ConfigurationError,
     LLMError,

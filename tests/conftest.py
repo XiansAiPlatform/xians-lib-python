@@ -1,8 +1,8 @@
 import pytest
 from pydantic import SecretStr
 
-from src.constants.v1 import LLMProvider
-from src.models.v1 import LLMConfig, TemporalConfig, XiansOptions
+from xians.constants.v1.core import LLMProvider
+from xians.models.v1.configs import LLMConfig, TemporalConfig, XiansOptions
 
 
 @pytest.fixture

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from src.models.v1.entities import AgentDefinition, WorkflowDefinition
-from src.utils.v1.hashing import compute_hash
+from xians.models.v1.entities import AgentDefinition, WorkflowDefinition
+from xians.utils.v1 import compute_hash
 
 
 class TestDefinitionHashing:
@@ -66,7 +66,7 @@ class TestDefinitionHashing:
 
     def test_workflow_definition_hash(self) -> None:
         """Test workflow definition hashing."""
-        from src.constants.v1.core import WorkflowType
+        from xians.constants.v1.core import WorkflowType
 
         workflow = WorkflowDefinition(
             workflow_type=WorkflowType.CONVERSATIONAL,
@@ -83,7 +83,7 @@ class TestDefinitionHashing:
 
     def test_workflow_definition_serialization(self) -> None:
         """Test workflow definition can be serialized to JSON."""
-        from src.constants.v1.core import WorkflowType
+        from xians.constants.v1.core import WorkflowType
 
         workflow = WorkflowDefinition(
             workflow_type=WorkflowType.TASK_BASED,
