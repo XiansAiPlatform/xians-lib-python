@@ -110,7 +110,7 @@ def test_xians_options_valid(sample_llm_config: LLMConfig) -> None:
     )
 
     assert str(options.server_url) == "https://api.xians.ai/"
-    assert options.api_key.get_secret_value() == "sk-valid-api-key-123456"
+    assert options.server_api_key.get_secret_value() == "sk-valid-api-key-123456"
     assert options.log_level == "INFO"  # default
 
 

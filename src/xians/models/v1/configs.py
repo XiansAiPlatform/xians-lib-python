@@ -1,4 +1,7 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator
+from pydantic import FieldValidationInfo, model_validator
 
 from ...constants.v1.core import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
@@ -18,8 +21,34 @@ class TemporalConfig(BaseModel):
     task_queue: str = Field(default="xians-agents", description="Task queue name")
     tls_enabled: bool = Field(default=False, description="Enable TLS connection")
     tls_cert_path: str | None = Field(default=None, description="Path to TLS certificate")
+    server_root_ca_cert_base64: SecretStr | None = Field(
+        default=None,
+        description="Base64-encoded server root CA certificate",
+    )
+    client_cert_base64: SecretStr | None = Field(
+        default=None,
+        description="Base64-encoded client certificate for mTLS",
+    )
+    client_private_key_base64: SecretStr | None = Field(
+        default=None,
+        description="Base64-encoded client private key for mTLS",
+    )
 
-    model_config = {"frozen": False}
+    model_config = {"frozen": False, "populate_by_name": True}
+
+    @field_validator("client_cert_base64", "client_private_key_base64")
+    @classmethod
+    def validate_mtls_pairs(
+        cls, v: SecretStr | None, info: FieldValidationInfo
+    ) -> SecretStr | None:
+        """Ensure mTLS cert/key are provided together when either is set."""
+        cert = v if v else info.data.get("client_cert_base64")
+        key = v if v else info.data.get("client_private_key_base64")
+        if cert and not key:
+            raise ValueError("client_private_key_base64 must be set when client_cert_base64 is provided")
+        if key and not cert:
+            raise ValueError("client_cert_base64 must be set when client_private_key_base64 is provided")
+        return v
 
 
 class LLMConfig(BaseModel):
@@ -57,7 +86,20 @@ class XiansServerConfig(BaseModel):
     """Configuration for Xians server connection."""
 
     server_url: HttpUrl = Field(description="Xians server base URL")
-    api_key: SecretStr = Field(description="API key for authentication")
+    auth_mode: Literal["bearer_cert", "x_api_key"] = Field(
+        default="bearer_cert",
+        description="Authentication mode for server requests",
+    )
+    bearer_cert_base64: SecretStr | None = Field(
+        default=None,
+        description="Base64-encoded certificate used for Bearer auth",
+        alias="api_key",
+    )
+    x_api_key: SecretStr | None = Field(
+        default=None,
+        description="Legacy X-API-Key value for auth_mode='x_api_key'",
+    )
+    tenant_id: str | None = Field(default=None, description="Tenant identifier for requests")
     timeout_seconds: int = Field(
         default=DEFAULT_HTTP_TIMEOUT_SECONDS,
         description="Request timeout in seconds",
@@ -70,20 +112,19 @@ class XiansServerConfig(BaseModel):
     )
     verify_ssl: bool = Field(default=True, description="Verify SSL certificates")
 
-    model_config = {"frozen": False}
+    model_config = {"frozen": False, "populate_by_name": True}
 
-    @field_validator("api_key")
+    @field_validator("bearer_cert_base64", "x_api_key")
     @classmethod
-    def validate_api_key(cls, v: SecretStr) -> SecretStr:
-        """Validate API key to catch common mistakes."""
+    def validate_auth_value(cls, v: SecretStr | None) -> SecretStr | None:
+        """Validate auth secrets to catch common mistakes."""
+        if v is None:
+            return None
         key_value = v.get_secret_value().strip()
-
         if not key_value:
-            raise ValueError("API key cannot be empty")
-
+            raise ValueError("Authentication secret cannot be empty")
         if len(key_value) < 10:
-            raise ValueError("API key appears to be too short (minimum 10 characters)")
-
+            raise ValueError("Authentication secret appears too short (minimum 10 characters)")
         placeholder_patterns = [
             "your-api-key",
             "your_api_key",
@@ -92,17 +133,24 @@ class XiansServerConfig(BaseModel):
             "test",
             "example",
         ]
-
         key_lower = key_value.lower()
         for pattern in placeholder_patterns:
             if pattern in key_lower:
                 raise ValueError(
-                    f"API key appears to be a placeholder ('{pattern}' detected). "
-                    "Please replace with your actual API key."
+                    f"Authentication secret appears to be a placeholder ('{pattern}' detected). "
+                    "Please provide a valid credential."
                 )
-
-        # Return with stripped whitespace
         return SecretStr(key_value)
+
+    @model_validator(mode="after")
+    def validate_auth_mode(self) -> "XiansServerConfig":
+        bearer = self.bearer_cert_base64
+        x_api = self.x_api_key
+        if self.auth_mode == "bearer_cert" and not bearer:
+            raise ValueError("bearer_cert auth_mode requires bearer_cert_base64")
+        if self.auth_mode == "x_api_key" and not x_api:
+            raise ValueError("x_api_key auth_mode requires x_api_key")
+        return self
 
 
 class XiansOptions(BaseModel):
@@ -113,7 +161,19 @@ class XiansOptions(BaseModel):
     """
 
     server_url: HttpUrl = Field(description="Xians server base URL")
-    api_key: SecretStr = Field(description="API key for authentication")
+    server_api_key: SecretStr | None = Field(
+        description="Base64-encoded certificate used for server authentication",
+        alias="api_key",
+    )
+    server_auth_mode: Literal["bearer_cert", "x_api_key"] = Field(
+        default="bearer_cert",
+        description="Authentication mode for server requests",
+    )
+    server_x_api_key: SecretStr | None = Field(
+        default=None,
+        description="Legacy X-API-Key credential for auth_mode='x_api_key'",
+    )
+    tenant_id: str | None = Field(default=None, description="Tenant identifier")
     temporal: TemporalConfig | None = Field(
         default=None,
         description="Temporal configuration (if None, fetch from server)",
@@ -125,28 +185,23 @@ class XiansOptions(BaseModel):
         description="Enable structured logging with structlog",
     )
 
-    model_config = {"frozen": False}
+    model_config = {"frozen": False, "populate_by_name": True}
 
-    @field_validator("api_key", mode="before")
+    @field_validator("server_api_key", mode="before")
     @classmethod
-    def validate_api_key(cls, v: str | SecretStr) -> SecretStr:
-        """Validate API key to catch common mistakes."""
-        # Handle both plain strings and SecretStr
+    def validate_server_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
+        """Validate server API key (base64 certificate) to catch common mistakes."""
+        if v is None:
+            return None
         if isinstance(v, SecretStr):
             key_value = v.get_secret_value()
         else:
             key_value = str(v) if v is not None else ""
-
-        # Strip whitespace
         key_value = key_value.strip()
-
         if not key_value:
             raise ValueError("API key cannot be empty")
-
         if len(key_value) < 10:
             raise ValueError("API key appears to be too short (minimum 10 characters)")
-
-        # Check for common placeholder values (only check first 50 chars to avoid false positives on long tokens)
         check_value = key_value[:50].lower()
         placeholder_patterns = [
             "your-api-key",
@@ -156,16 +211,21 @@ class XiansOptions(BaseModel):
             "test-key",
             "example-key",
         ]
-
         for pattern in placeholder_patterns:
             if pattern in check_value:
                 raise ValueError(
                     f"API key appears to be a placeholder ('{pattern}' detected). "
                     "Please replace with your actual API key."
                 )
-
-        # Return with stripped whitespace
         return SecretStr(key_value)
+
+    @model_validator(mode="after")
+    def validate_server_auth_mode(self) -> "XiansOptions":
+        if self.server_auth_mode == "bearer_cert" and not self.server_api_key:
+            raise ValueError("server_api_key is required when server_auth_mode is 'bearer_cert'")
+        if self.server_auth_mode == "x_api_key" and not self.server_x_api_key:
+            raise ValueError("server_x_api_key is required when server_auth_mode is 'x_api_key'")
+        return self
 
     @field_validator("log_level")
     @classmethod

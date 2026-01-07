@@ -187,7 +187,10 @@ class XiansPlatform:
 
         server_config = XiansServerConfig(
             server_url=options.server_url,
-            api_key=options.api_key,
+            auth_mode=options.server_auth_mode,
+            bearer_cert_base64=options.server_api_key,
+            x_api_key=options.server_x_api_key,
+            tenant_id=options.tenant_id,
         )
         xians_client = XiansServerClient(server_config)
 
@@ -196,12 +199,7 @@ class XiansPlatform:
             logger.info("Fetching Temporal settings from Xians Server...")
             try:
                 settings = await xians_client.fetch_temporal_settings()
-                temporal_config = TemporalConfig(
-                    host=settings.get("host", "localhost"),
-                    port=settings.get("port", 7233),
-                    namespace=settings.get("namespace", "default"),
-                    task_queue=settings.get("task_queue", "xians-agents"),
-                )
+                temporal_config = cls._build_temporal_config_from_settings(settings)
                 logger.info(f"Using Temporal at {temporal_config.host}:{temporal_config.port}")
             except Exception as e:
                 raise ConfigurationError(
@@ -359,6 +357,35 @@ class XiansPlatform:
             logger.warning(f"Shutdown completed with {len(errors)} error(s)")
         else:
             logger.info("Xians Platform shutdown complete")
+
+    @staticmethod
+    def _build_temporal_config_from_settings(settings: dict[str, object]) -> TemporalConfig:
+        """Build TemporalConfig from server settings with .NET-aligned field names."""
+        from urllib.parse import urlparse
+        import os
+
+        server_url_override = os.getenv("TEMPORAL_SERVER_URL")
+        flow_server_url = str(server_url_override or settings.get("flowServerUrl") or "")
+        if not flow_server_url:
+            raise ConfigurationError("flowServerUrl missing from Temporal settings")
+
+        parsed = urlparse(flow_server_url if "://" in flow_server_url else f"dns://{flow_server_url}")
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 7233
+        namespace = str(settings.get("flowServerNamespace") or settings.get("namespace") or "default")
+
+        tls_enabled = bool(settings.get("flowServerCertBase64") or settings.get("flowServerPrivateKeyBase64"))
+
+        return TemporalConfig(
+            host=host,
+            port=port,
+            namespace=namespace,
+            task_queue=settings.get("task_queue", "xians-agents"),
+            tls_enabled=tls_enabled,
+            server_root_ca_cert_base64=settings.get("flowServerCertBase64"),
+            client_cert_base64=settings.get("flowServerCertBase64"),
+            client_private_key_base64=settings.get("flowServerPrivateKeyBase64"),
+        )
 
 
 __all__ = [

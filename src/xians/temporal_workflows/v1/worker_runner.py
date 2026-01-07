@@ -1,6 +1,7 @@
 """Temporal worker host and runner for Xians SDK v1."""
 
 import asyncio
+import base64
 import logging
 from typing import Any, Callable
 
@@ -45,11 +46,32 @@ class WorkerHost:
             target = f"{self.config.host}:{self.config.port}"
             tls_config = None
             if self.config.tls_enabled:
-                if not self.config.tls_cert_path:
-                    raise TemporalError("TLS enabled but no certificate path provided")
-                with open(self.config.tls_cert_path, "rb") as f:
-                    cert_data = f.read()
-                tls_config = TLSConfig(server_root_ca_cert=cert_data)
+                server_root = (
+                    base64.b64decode(self.config.server_root_ca_cert_base64.get_secret_value())
+                    if self.config.server_root_ca_cert_base64
+                    else None
+                )
+                client_cert = (
+                    base64.b64decode(self.config.client_cert_base64.get_secret_value())
+                    if self.config.client_cert_base64
+                    else None
+                )
+                client_key = (
+                    base64.b64decode(self.config.client_private_key_base64.get_secret_value())
+                    if self.config.client_private_key_base64
+                    else None
+                )
+                if (client_cert and not client_key) or (client_key and not client_cert):
+                    raise TemporalError("Both client_cert_base64 and client_private_key_base64 must be provided for mTLS")
+                if not server_root and not client_cert and not client_key and self.config.tls_cert_path:
+                    with open(self.config.tls_cert_path, "rb") as f:
+                        server_root = f.read()
+
+                tls_config = TLSConfig(
+                    server_root_ca_cert=server_root,
+                    client_cert=client_cert,
+                    client_private_key=client_key,
+                )
 
             self.client = await Client.connect(
                 target,

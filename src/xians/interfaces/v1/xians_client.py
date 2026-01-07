@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -28,6 +28,7 @@ class XiansServerClient:
         self,
         config: XiansServerConfig,
         cache_dir: Path | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.config = config
         self.cache_dir = cache_dir or Path.home() / ".xians" / "cache"
@@ -35,18 +36,42 @@ class XiansServerClient:
         self._cache_file = self.cache_dir / "uploaded_definitions.json"
         self._uploaded_hashes: dict[str, str] = self._load_cache()
 
-        api_key_value = config.api_key.get_secret_value()
         logger.debug(
-            f"Initializing XiansServerClient with server_url={config.server_url}, "
-            f"api_key={'*' * min(len(api_key_value), 8)} (length: {len(api_key_value)})"
+            "Initializing XiansServerClient",
+            extra={"server_url": str(config.server_url)},
         )
 
         self._client = httpx.AsyncClient(
             base_url=str(config.server_url),
-            headers={"X-API-Key": api_key_value},
             timeout=config.timeout_seconds,
             verify=config.verify_ssl,
+            event_hooks={"request": [self._inject_headers]},
+            transport=transport,
         )
+
+    async def _inject_headers(self, request: httpx.Request) -> None:
+        """Inject auth and tenant headers for agent API calls."""
+        if self.config.auth_mode == "bearer_cert" and self.config.bearer_cert_base64:
+            request.headers.setdefault(
+                "Authorization",
+                f"Bearer {self.config.bearer_cert_base64.get_secret_value()}",
+            )
+        elif self.config.auth_mode == "x_api_key" and self.config.x_api_key:
+            request.headers.setdefault("X-API-Key", self.config.x_api_key.get_secret_value())
+
+        if "/api/agent/" in request.url.path and self.config.tenant_id:
+            request.headers.setdefault("X-Tenant-Id", self.config.tenant_id)
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Make an HTTP request with retry handling."""
+        response = await self._client.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response
 
     def _load_cache(self) -> dict[str, str]:
         """Load uploaded definition hashes from cache file."""
@@ -79,21 +104,15 @@ class XiansServerClient:
             XiansServerError: If authentication fails or server returns an error.
         """
         try:
-            response = await self._client.get("/api/agent/settings/flowserver")
-            response.raise_for_status()
+            response = await self._request("GET", "/api/agent/settings/flowserver")
             data = response.json()
             logger.info("Successfully fetched Temporal settings from Xians Server")
             return data
         except httpx.HTTPStatusError as e:
-            # Enhanced error message for authentication failures
             if e.response.status_code == 401:
                 error_msg = (
                     "Authentication failed (401 Unauthorized). "
-                    "Please verify that:\n"
-                    "  1. Your API key is correct and valid\n"
-                    "  2. The API key has not expired\n"
-                    "  3. The API key is properly set in XiansOptions(api_key='...')\n"
-                    f"  4. The server URL is correct: {self.config.server_url}"
+                    "Please verify that your server credentials are valid and configured."
                 )
                 logger.error(error_msg)
             else:
@@ -127,7 +146,8 @@ class XiansServerClient:
                 return definition.agent_key or definition.name
 
         try:
-            response = await self._client.post(
+            response = await self._request(
+                "POST",
                 "/api/agent/definitions",
                 json=definition.model_dump(mode="json"),
             )
@@ -169,7 +189,8 @@ class XiansServerClient:
                 return definition.name
 
         try:
-            response = await self._client.post(
+            response = await self._request(
+                "POST",
                 "/api/agent/definitions/workflows",
                 json=definition.model_dump(mode="json"),
             )
@@ -211,11 +232,11 @@ class XiansServerClient:
         }
 
         try:
-            response = await self._client.post(
+            response = await self._request(
+                "POST",
                 "/api/agent/conversation/outbound",
                 json=payload,
             )
-            response.raise_for_status()
             logger.debug(f"Successfully sent outbound message to conversation {conversation_id}")
         except httpx.HTTPStatusError as e:
             raise XiansServerError(
@@ -235,8 +256,7 @@ class XiansServerClient:
         Send a usage event to Xians Server.
         """
         try:
-            response = await self._client.post("/api/agent/usage", json=event)
-            response.raise_for_status()
+            await self._request("POST", "/api/agent/usage", json=event)
             logger.debug("Successfully sent usage event")
         except httpx.HTTPStatusError as e:
             logger.warning(f"Failed to send usage event: {e.response.status_code}")
@@ -259,8 +279,7 @@ class XiansServerClient:
         }
 
         try:
-            response = await self._client.post("/api/agent/knowledge/search", json=payload)
-            response.raise_for_status()
+            response = await self._request("POST", "/api/agent/knowledge/search", json=payload)
             return response.json()
         except httpx.HTTPStatusError as e:
             raise XiansServerError(
@@ -280,8 +299,7 @@ class XiansServerClient:
         Fetch a document by ID.
         """
         try:
-            response = await self._client.get(f"/api/agent/documents/{document_id}")
-            response.raise_for_status()
+            response = await self._request("GET", f"/api/agent/documents/{document_id}")
             return response.json()
         except httpx.HTTPStatusError as e:
             raise XiansServerError(
