@@ -420,9 +420,38 @@ class XiansPlatform:
         if not flow_server_url:
             raise ConfigurationError("flowServerUrl missing from Temporal settings")
 
-        parsed = urlparse(flow_server_url if "://" in flow_server_url else f"dns://{flow_server_url}")
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 7233
+        # Parse the URL to extract host and port
+        # Strip any scheme prefixes that might interfere with DNS resolution
+        flow_server_url = flow_server_url.strip()
+
+        # Remove scheme if present (dns://, http://, https://, etc.)
+        if "://" in flow_server_url:
+            _, flow_server_url = flow_server_url.split("://", 1)
+
+        # Now parse as host:port
+        host: str
+        port: int
+
+        if ":" in flow_server_url:
+            parts = flow_server_url.rsplit(":", 1)  # rsplit to handle IPv6
+            host = parts[0]
+            try:
+                port = int(parts[1])
+            except (ValueError, IndexError):
+                logger.warning(f"Invalid port in flowServerUrl '{flow_server_url}', using default 7233")
+                port = 7233
+        else:
+            host = flow_server_url
+            port = 7233
+
+        # Clean up host (remove any trailing slashes or whitespace)
+        host = host.strip().rstrip("/")
+
+        if not host:
+            raise ConfigurationError(f"Invalid flowServerUrl: '{settings.get('flowServerUrl')}' - could not extract hostname")
+
+        logger.debug(f"Parsed Temporal address: host='{host}', port={port}")
+
         namespace = str(settings.get("flowServerNamespace") or settings.get("namespace") or "default")
 
         # TLS materials may be provided as base64 or raw PEM

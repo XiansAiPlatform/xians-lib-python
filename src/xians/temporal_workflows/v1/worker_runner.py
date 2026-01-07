@@ -128,6 +128,14 @@ class WorkerHost:
                 )
             elif "hostname" in err_str or "SNI" in err_str:
                 msg += " Hint: Set TemporalConfig.tls.domain to the server certificate hostname."
+            elif "dns error" in err_str.lower() or "nodename nor servname" in err_str:
+                msg += (
+                    f" Hint: DNS resolution failed for '{self.config.address}'. "
+                    "Verify the hostname is correct and resolvable. "
+                    "Check your network connection and DNS settings. "
+                    "For Temporal Cloud, ensure the address is in format: 'namespace.accountid.tmprl.cloud:7233'. "
+                    "If the address is behind a proxy or VPN, ensure proper network configuration."
+                )
 
             raise TemporalError(msg, cause=e)
 
