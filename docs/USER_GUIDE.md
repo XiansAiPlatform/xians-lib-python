@@ -8,6 +8,7 @@
 - [Core Concepts](#core-concepts)
 - [Usage Examples](#usage-examples)
 - [API Reference](#api-reference)
+- [Xians Server Integration API](#xians-server-integration-api)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 
@@ -740,6 +741,837 @@ AgentResponse(
     model: str | None = None,
     metadata: dict = {},
 )
+```
+
+---
+
+## Xians Server Integration
+
+The SDK provides typed APIs for integrating with Xians Server for workflow definitions, conversation management, usage reporting, knowledge base operations, and document storage. All server interactions use strict payload validation and camelCase JSON serialization.
+
+### Prerequisites
+
+- Access to a Xians Server instance
+- Valid API key configured in `XiansOptions`
+- Server URL configured in `XiansOptions`
+
+### Flow Definition Upload
+
+Upload workflow definitions to Xians Server for registration and discovery.
+
+```python
+from xians.models.v1.server_contracts import (
+    ParameterDefinition,
+    ActivityDefinitionRequest,
+    FlowDefinitionRequest,
+)
+
+# Create parameter definitions
+param = ParameterDefinition(
+    name="input_message",
+    type="string",
+)
+
+# Create activity definitions
+activity = ActivityDefinitionRequest(
+    activity_name="process_message",
+    knowledge_ids=["kb_001"],
+    parameter_definitions=[param],
+)
+
+# Create flow definition
+flow = FlowDefinitionRequest(
+    agent="MyAgent",
+    workflow_type="Conversational",
+    activity_definitions=[activity],
+    parameter_definitions=[param],
+    system_scoped=False,
+)
+
+# Upload to server
+response = await platform.server_client.upload_flow_definition(flow)
+```
+
+**Validation Rules:**
+- `agent` - required, non-empty string
+- `workflowType` - required, non-empty string
+- `activityDefinitions` - required, minimum 1 element
+- `parameterDefinitions` - required, minimum 1 element
+
+### Outbound Conversation Messages
+
+Send conversation updates back to participants through Xians Server.
+
+#### Send Chat Message
+
+```python
+from xians.models.v1.server_contracts import ChatOrDataRequest
+
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    workflow_id="workflow_456",
+    text="Hello! How can I help you today?",
+)
+
+response = await platform.server_client.send_outbound_chat(request)
+```
+
+#### Send Data Payload
+
+```python
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    data={
+        "action": "update_status",
+        "status": "completed",
+        "details": {"processed_items": 42}
+    },
+)
+
+response = await platform.server_client.send_outbound_data(request)
+```
+
+#### Send Webhook Event
+
+```python
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    data={"event": "conversation_milestone", "milestone": "halfway"},
+)
+
+response = await platform.server_client.send_outbound_webhook(request)
+```
+
+#### Send Handoff
+
+```python
+from xians.models.v1.server_contracts import HandoffRequest
+
+request = HandoffRequest(
+    participant_id="user_123",
+    target="human_agent",
+    reason="Complex issue requires human expertise",
+    text="Connecting you with a specialist...",
+)
+
+response = await platform.server_client.send_handoff(request)
+```
+
+### Usage Reporting
+
+Report LLM token usage and performance metrics to Xians Server.
+
+```python
+from xians.models.v1.server_contracts import UsageReportRequest
+
+usage = UsageReportRequest(
+    model="gpt-4",
+    workflow_id="workflow_456",
+    request_id="req_789",
+    source="openai",
+    prompt_tokens=150,
+    completion_tokens=75,
+    total_tokens=225,
+    message_count=3,
+    response_time_ms=1200,
+    metadata={"region": "us-east-1", "batch_size": 1},
+)
+
+response = await platform.server_client.report_usage(usage)
+```
+
+**Validation Rules:**
+- All token counts (`promptTokens`, `completionTokens`, `totalTokens`, `messageCount`) must be integers >= 0
+- Warning logged if all counts are 0
+
+### Knowledge Base Management
+
+Query, retrieve, and manage knowledge bases registered with Xians Server.
+
+#### Get Latest Knowledge
+
+```python
+kb = await platform.server_client.get_latest_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+)
+```
+
+#### List All Knowledge
+
+```python
+all_knowledge = await platform.server_client.list_knowledge(agent="MyAgent")
+```
+
+#### Create Knowledge
+
+```python
+kb = await platform.server_client.create_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+    type="document",
+    content="Q: What is your product? A: It helps...",
+)
+```
+
+#### Delete Knowledge
+
+```python
+response = await platform.server_client.delete_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+)
+```
+
+### Document Management
+
+Store and retrieve documents through Xians Server's document API.
+
+#### Save Document
+
+```python
+document = {
+    "title": "User Profile",
+    "user_id": "user_123",
+    "email": "user@example.com",
+}
+
+response = await platform.server_client.save_document(
+    document=document,
+    options={"index": True, "ttl": 3600},
+)
+```
+
+#### Get Document by ID
+
+```python
+doc = await platform.server_client.get_document(id="doc_789")
+```
+
+#### Get Document by Key
+
+```python
+doc = await platform.server_client.get_document_by_key(
+    type="user_profile",
+    key="user_123",
+)
+```
+
+#### Query Documents
+
+```python
+results = await platform.server_client.query_documents(
+    query={"status": "active", "type": "conversation"},
+    content_type="application/json",
+)
+```
+
+#### Update Document
+
+```python
+updated_doc = {"id": "doc_789", "title": "Updated Title"}
+response = await platform.server_client.update_document(
+    document=updated_doc,
+    options={"merge": True},
+)
+```
+
+#### Delete Document
+
+```python
+response = await platform.server_client.delete_document(id="doc_789")
+```
+
+#### Delete Multiple Documents
+
+```python
+response = await platform.server_client.delete_many_documents(
+    ids=["doc_789", "doc_790", "doc_791"]
+)
+```
+
+#### Check Document Existence
+
+```python
+result = await platform.server_client.document_exists(id="doc_789")
+# Returns: {"exists": true}
+```
+
+### Error Handling
+
+All server calls raise `XiansServerError` on failure. Errors include full context:
+
+```python
+from xians.exceptions.v1.errors import XiansServerError
+
+try:
+    response = await platform.server_client.upload_flow_definition(flow)
+except XiansServerError as e:
+    print(f"Status: {e.status_code}")
+    print(f"Method: {e.method}")
+    print(f"URL: {e.url}")
+    print(f"Response: {e.response_body}")
+    
+    # Special handling for validation errors
+    if e.status_code == 400:
+        print("Payload validation failed - check required fields")
+```
+
+### Complete Example: Conversational Agent with Server Integration
+
+```python
+import asyncio
+from temporalio import activity
+from xians.platform.v1 import XiansPlatform, XiansOptions, TemporalConfig, LLMConfig
+from xians.models.v1.server_contracts import (
+    ChatOrDataRequest,
+    UsageReportRequest,
+    FlowDefinitionRequest,
+    ActivityDefinitionRequest,
+    ParameterDefinition,
+)
+from xians.models.v1 import AgentRequest, AgentResponse
+
+@activity.defn
+async def execute_conversational_agent(request: AgentRequest) -> AgentResponse:
+    """Conversational agent with server integration."""
+    # Your agent logic here
+    message = request.message if isinstance(request.message, str) else str(request.message)
+    result = f"Response to: {message}"
+    
+    return AgentResponse(
+        text=result,
+        usage={"prompt_tokens": 50, "completion_tokens": 30},
+        model="gpt-4",
+    )
+
+async def main():
+    options = XiansOptions(
+        server_url="https://api.xians.ai",
+        api_key="your-api-key",
+        temporal=TemporalConfig(host="localhost", port=7233),
+        llm=LLMConfig(provider="openai", model="gpt-4", api_key="your-openai-key"),
+    )
+    
+    platform = await XiansPlatform.initialize(options)
+    
+    # Register agent and workflow
+    agent = platform.agents.register(name="ConversationalAgent")
+    agent.define_conversation_workflow(
+        name="Conversation",
+        workers=1,
+        activity_func=execute_conversational_agent,
+    )
+    
+    # Upload flow definition to server
+    param = ParameterDefinition(name="message", type="string")
+    activity_def = ActivityDefinitionRequest(activity_name="chat")
+    flow = FlowDefinitionRequest(
+        agent="ConversationalAgent",
+        workflow_type="Conversational",
+        activity_definitions=[activity_def],
+        parameter_definitions=[param],
+    )
+    
+    try:
+        await platform.server_client.upload_flow_definition(flow)
+        print("✓ Flow definition uploaded")
+    except Exception as e:
+        print(f"✗ Upload failed: {e}")
+    
+    # Start workers
+    await platform.run_all()
+
+async def client_example():
+    options = XiansOptions(
+        server_url="https://api.xians.ai",
+        api_key="your-api-key",
+        temporal=TemporalConfig(host="localhost", port=7233),
+        llm=LLMConfig(provider="openai", model="gpt-4", api_key="your-openai-key"),
+    )
+    
+    platform = await XiansPlatform.initialize(options)
+    await platform.connect_temporal()
+    client = platform.client()
+    
+    # Send chat message
+    request = ChatOrDataRequest(
+        participant_id="user_123",
+        text="Hello!",
+    )
+    
+    response = await platform.server_client.send_outbound_chat(request)
+    print(f"Chat sent: {response}")
+    
+    # Report usage
+    usage = UsageReportRequest(
+        prompt_tokens=50,
+        completion_tokens=30,
+        total_tokens=80,
+        message_count=1,
+    )
+    
+    response = await platform.server_client.report_usage(usage)
+    print(f"Usage reported: {response}")
+    
+    await platform.shutdown()
+
+if __name__ == "__main__":
+    # Run server
+    asyncio.run(main())
+    
+    # Or run client in another process
+    # asyncio.run(client_example())
+```
+
+---
+
+## Xians Server Integration API
+
+The Xians Python SDK provides typed, production-ready methods for interacting with the Xians Server REST API. All methods use Pydantic v2 models with strict validation and camelCase JSON serialization.
+
+### Overview
+
+The Xians Server API provides five categories of operations:
+
+1. **Definitions** - Upload and manage agent/workflow definitions
+2. **Conversation Outbound** - Send messages, data, webhooks, and handoffs to participants
+3. **Usage Reporting** - Report token consumption and usage metrics
+4. **Knowledge** - Manage knowledge bases
+5. **Documents** - Store, retrieve, and query documents
+
+### Prerequisites
+
+Before using these APIs, initialize the platform:
+
+```python
+from xians.interfaces.v1.xians_client import XiansServerClient
+from xians.models.v1.configs import XiansServerConfig
+
+config = XiansServerConfig(
+    server_url="https://api.xians.ai",
+    auth_mode="bearer_cert",
+    bearer_cert_base64="your-bearer-token",
+)
+
+client = XiansServerClient(config)
+```
+
+### A) Definitions Upload
+
+Upload agent and workflow definitions to the Xians Server.
+
+#### `client.upload_flow_definition(definition: FlowDefinitionRequest) -> dict`
+
+Upload a flow definition to `POST /api/agent/definitions`.
+
+**Example:**
+```python
+from xians.models.v1.server_contracts import (
+    FlowDefinitionRequest,
+    ActivityDefinitionRequest,
+    ParameterDefinition,
+)
+
+# Define parameters
+param = ParameterDefinition(
+    name="input_message",
+    type="string",
+)
+
+# Define activities
+activity = ActivityDefinitionRequest(
+    activity_name="process_message",
+    knowledge_ids=["kb_001", "kb_002"],
+    parameter_definitions=[param],
+)
+
+# Create and upload flow definition
+flow = FlowDefinitionRequest(
+    agent="MyAgent",
+    workflow_type="Conversational",
+    name="Main Workflow",
+    activity_definitions=[activity],
+    parameter_definitions=[param],
+    system_scoped=False,
+)
+
+response = await client.upload_flow_definition(flow)
+print(f"Upload response: {response}")
+```
+
+**Validation:**
+- `agent` and `workflowType` must be non-empty strings
+- `activityDefinitions` must have at least 1 entry
+- `parameterDefinitions` must have at least 1 entry
+- Each activity must include `knowledgeIds` and `parameterDefinitions` keys (can be empty arrays)
+
+**Errors:**
+- `XiansServerError(status_code=400)` - Payload validation failed; check required fields
+
+---
+
+### B) Conversation Outbound APIs
+
+Send messages and data to participants in conversations.
+
+#### `client.send_outbound_chat(request: ChatOrDataRequest) -> dict`
+
+Send chat message to `POST /api/agent/conversation/outbound/chat`.
+
+**Example:**
+```python
+from xians.models.v1.server_contracts import ChatOrDataRequest
+
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    text="Hello! How can I help?",
+    workflow_id="wf_456",
+)
+
+response = await client.send_outbound_chat(request)
+```
+
+#### `client.send_outbound_data(request: ChatOrDataRequest) -> dict`
+
+Send structured data to `POST /api/agent/conversation/outbound/data`.
+
+**Example:**
+```python
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    data={
+        "action": "update_status",
+        "status": "completed",
+        "metadata": {"timestamp": "2026-01-07T10:00:00Z"}
+    },
+)
+
+response = await client.send_outbound_data(request)
+```
+
+#### `client.send_outbound_webhook(request: ChatOrDataRequest) -> dict`
+
+Send webhook to `POST /api/agent/conversation/outbound/webhook`.
+
+**Example:**
+```python
+request = ChatOrDataRequest(
+    participant_id="user_123",
+    data={"event": "conversation_started", "timestamp": 1704633600},
+)
+
+response = await client.send_outbound_webhook(request)
+```
+
+#### `client.send_handoff(request: HandoffRequest) -> dict`
+
+Send handoff request to `POST /api/agent/conversation/outbound/handoff`.
+
+**Example:**
+```python
+from xians.models.v1.server_contracts import HandoffRequest
+
+request = HandoffRequest(
+    participant_id="user_123",
+    target="human_agent",
+    reason="User requested escalation",
+    text="Transferring to human support team",
+)
+
+response = await client.send_handoff(request)
+```
+
+**Validation:**
+- `participant_id` must be non-empty string
+- `target` in handoff request indicates handoff destination
+- Other fields are optional
+
+---
+
+### C) Usage Reporting
+
+Report token consumption and usage metrics to the Xians Server.
+
+#### `client.report_usage(request: UsageReportRequest) -> dict`
+
+Report usage to `POST /api/agent/usage/report`.
+
+**Example:**
+```python
+from xians.models.v1.server_contracts import UsageReportRequest
+
+request = UsageReportRequest(
+    model="gpt-4",
+    workflow_id="wf_123",
+    request_id="req_456",
+    source="openai",
+    prompt_tokens=150,
+    completion_tokens=75,
+    total_tokens=225,
+    message_count=2,
+    response_time_ms=1200,
+    metadata={"region": "us-east-1", "version": "1.0"},
+)
+
+response = await client.report_usage(request)
+```
+
+**Validation:**
+- All token counts (`promptTokens`, `completionTokens`, `totalTokens`, `messageCount`) must be integers >= 0
+- At least one counter should be > 0 (SDK logs warning if all are 0)
+- All other fields are optional
+
+---
+
+### D) Knowledge Management
+
+Manage knowledge bases for agents.
+
+#### `client.get_latest_knowledge(name: str, agent: str) -> dict`
+
+Get latest knowledge by name and agent. (`GET /api/agent/knowledge/latest`)
+
+**Example:**
+```python
+kb = await client.get_latest_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+)
+```
+
+#### `client.list_knowledge(agent: str) -> dict`
+
+List all knowledge for an agent. (`GET /api/agent/knowledge/list`)
+
+**Example:**
+```python
+all_kb = await client.list_knowledge(agent="MyAgent")
+```
+
+#### `client.create_knowledge(name: str, agent: str, type: str, content: str) -> dict`
+
+Create new knowledge. (`POST /api/agent/knowledge`)
+
+**Example:**
+```python
+kb = await client.create_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+    type="document",
+    content="Q: What is your product? A: It is a Temporal-first agent runtime...",
+)
+```
+
+#### `client.delete_knowledge(name: str, agent: str) -> dict`
+
+Delete knowledge by name and agent. (`DELETE /api/agent/knowledge`)
+
+**Example:**
+```python
+response = await client.delete_knowledge(
+    name="product_faq",
+    agent="MyAgent",
+)
+```
+
+---
+
+### E) Document Management
+
+Store, retrieve, and query documents.
+
+#### `client.save_document(document: dict, options: dict | None = None) -> dict`
+
+Save a document. (`POST /api/agent/documents/save`)
+
+**Example:**
+```python
+doc = {
+    "title": "User Profile",
+    "user_id": "user_123",
+    "email": "user@example.com",
+}
+
+response = await client.save_document(
+    document=doc,
+    options={"index": True},
+)
+```
+
+#### `client.get_document(id: str) -> dict`
+
+Get document by ID. (`POST /api/agent/documents/get`)
+
+**Example:**
+```python
+doc = await client.get_document(id="doc_789")
+```
+
+#### `client.get_document_by_key(type: str, key: str) -> dict`
+
+Get document by type and key. (`POST /api/agent/documents/get-by-key`)
+
+**Example:**
+```python
+doc = await client.get_document_by_key(
+    type="user_profile",
+    key="user_123",
+)
+```
+
+#### `client.query_documents(query: dict, content_type: str | None = None) -> dict`
+
+Query documents. (`POST /api/agent/documents/query`)
+
+**Example:**
+```python
+results = await client.query_documents(
+    query={"status": "active", "created_after": "2026-01-01"},
+    content_type="application/json",
+)
+```
+
+#### `client.update_document(document: dict, options: dict | None = None) -> dict`
+
+Update a document. (`POST /api/agent/documents/update`)
+
+**Example:**
+```python
+response = await client.update_document(
+    document={"id": "doc_789", "title": "Updated Title"},
+    options={"merge": True},
+)
+```
+
+#### `client.delete_document(id: str) -> dict`
+
+Delete document by ID. (`POST /api/agent/documents/delete`)
+
+**Example:**
+```python
+response = await client.delete_document(id="doc_789")
+```
+
+#### `client.delete_many_documents(ids: list[str]) -> dict`
+
+Delete multiple documents. (`POST /api/agent/documents/delete-many`)
+
+**Example:**
+```python
+response = await client.delete_many_documents(
+    ids=["doc_789", "doc_790", "doc_791"]
+)
+```
+
+#### `client.document_exists(id: str) -> dict`
+
+Check if document exists. (`POST /api/agent/documents/exists`)
+
+**Example:**
+```python
+result = await client.document_exists(id="doc_789")
+# Returns: {"exists": true} or {"exists": false}
+```
+
+---
+
+### Error Handling
+
+All Xians Server API calls raise `XiansServerError` on failure:
+
+```python
+from xians.exceptions.v1.errors import XiansServerError
+
+try:
+    response = await client.upload_flow_definition(flow)
+except XiansServerError as e:
+    print(f"Status Code: {e.status_code}")
+    print(f"Method: {e.method}")
+    print(f"URL: {e.url}")
+    print(f"Response: {e.response_body}")
+```
+
+**Common Status Codes:**
+- `400` - Bad Request (payload validation failed)
+- `401` - Unauthorized (invalid/expired API key)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not Found (resource doesn't exist)
+- `500` - Internal Server Error
+
+---
+
+### Complete Example: End-to-End Workflow
+
+```python
+import asyncio
+from xians.interfaces.v1.xians_client import XiansServerClient
+from xians.models.v1.configs import XiansServerConfig
+from xians.models.v1.server_contracts import (
+    FlowDefinitionRequest,
+    ActivityDefinitionRequest,
+    ParameterDefinition,
+    ChatOrDataRequest,
+    UsageReportRequest,
+)
+
+async def main():
+    # Initialize client
+    config = XiansServerConfig(
+        server_url="https://api.xians.ai",
+        auth_mode="bearer_cert",
+        bearer_cert_base64="your-token",
+    )
+    client = XiansServerClient(config)
+    
+    try:
+        # 1. Define and upload workflow
+        param = ParameterDefinition(name="message", type="string")
+        activity = ActivityDefinitionRequest(
+            activity_name="chat",
+            knowledge_ids=["kb_001"],
+        )
+        flow = FlowDefinitionRequest(
+            agent="MyBot",
+            workflow_type="Conversational",
+            activity_definitions=[activity],
+            parameter_definitions=[param],
+        )
+        await client.upload_flow_definition(flow)
+        print("✓ Workflow uploaded")
+        
+        # 2. Send chat message
+        chat_req = ChatOrDataRequest(
+            participant_id="user_123",
+            text="Hello bot!",
+        )
+        await client.send_outbound_chat(chat_req)
+        print("✓ Chat sent")
+        
+        # 3. Report usage
+        usage = UsageReportRequest(
+            prompt_tokens=50,
+            completion_tokens=100,
+            total_tokens=150,
+            message_count=1,
+        )
+        await client.report_usage(usage)
+        print("✓ Usage reported")
+        
+        # 4. Save conversation to documents
+        doc = {
+            "conversation_id": "conv_123",
+            "user_id": "user_123",
+            "messages": [{"role": "user", "content": "Hello bot!"}],
+        }
+        await client.save_document(document=doc)
+        print("✓ Document saved")
+        
+    finally:
+        await client.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ---

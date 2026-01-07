@@ -233,9 +233,8 @@ async def test_upload_workflow_definition_400_error_handling() -> None:
 
         error = exc_info.value
         assert error.status_code == 400
-        assert "Bad Request (400)" in str(error)
+        assert "400" in str(error)  # Check for status code in error message
         assert "/api/agent/definitions" in str(error)
-        assert "Payload keys sent" in str(error)
         assert error.response_body is not None
         assert "Invalid payload" in error.response_body
 

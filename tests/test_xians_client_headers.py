@@ -58,7 +58,7 @@ async def test_x_api_key_header_injected() -> None:
     )
     client = XiansServerClient(config, transport=transport)
 
-    await client.fetch_document("doc-1")
+    await client.get_document("doc-1")
 
     assert captured["api_key"] == "super-secret-api-key"
     assert captured["tenant"] is None

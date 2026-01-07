@@ -1,9 +1,13 @@
-"""Xians Server HTTP client implementation for SDK v1."""
+"""Xians Server HTTP client implementation for SDK v1.
+
+This client implements the canonical Xians Server REST API contracts as defined in server_contracts.py.
+All endpoints follow strict payload validation and camelCase JSON serialization.
+"""
 
 import json
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -11,6 +15,12 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from ...exceptions.v1.errors import XiansServerError
 from ...models.v1.configs import XiansServerConfig
 from ...models.v1.entities import AgentDefinition, WorkflowDefinition
+from ...models.v1.server_contracts import (
+    ChatOrDataRequest,
+    FlowDefinitionRequest,
+    HandoffRequest,
+    UsageReportRequest,
+)
 from ...utils.v1.hashing import compute_hash
 from ...utils.v1.payload_builder import build_workflow_definition_payload
 
@@ -69,10 +79,41 @@ class XiansServerClient:
         url: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        """Make an HTTP request with retry handling."""
-        response = await self._client.request(method, url, **kwargs)
-        response.raise_for_status()
-        return response
+        """
+        Make an HTTP request with error handling.
+
+        Args:
+            method: HTTP method (GET, POST, etc.).
+            url: Request URL/path.
+            **kwargs: Additional httpx.request arguments.
+
+        Returns:
+            The response object.
+
+        Raises:
+            XiansServerError: On any non-2xx response.
+        """
+        try:
+            response = await self._client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as e:
+            error_msg = f"HTTP {e.response.status_code}: {method} {url}"
+            raise XiansServerError(
+                error_msg,
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+                method=method,
+                url=url,
+                cause=e,
+            ) from e
+        except httpx.RequestError as e:
+            raise XiansServerError(
+                f"Request error: {str(e)}",
+                method=method,
+                url=url,
+                cause=e,
+            ) from e
 
     def _load_cache(self) -> dict[str, str]:
         """Load uploaded definition hashes from cache file."""
@@ -131,9 +172,58 @@ class XiansServerClient:
                 cause=e,
             )
 
+    async def upload_flow_definition(
+        self,
+        definition: FlowDefinitionRequest,
+    ) -> dict[str, Any]:
+        """
+        Upload flow definition to Xians Server.
+
+        Implements POST /api/agent/definitions per server contract.
+
+        Args:
+            definition: FlowDefinitionRequest with required and optional fields.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the upload fails, including 400 Bad Request details.
+        """
+        try:
+            payload = definition.model_dump(by_alias=True, exclude_none=True)
+            logger.debug(
+                f"Uploading flow definition for agent='{definition.agent}', "
+                f"workflowType='{definition.workflow_type}'"
+            )
+
+            response = await self._request(
+                "POST",
+                "/api/agent/definitions",
+                json=payload,
+            )
+            result = response.json()
+            logger.info(
+                f"Successfully uploaded flow definition: agent='{definition.agent}', "
+                f"workflowType='{definition.workflow_type}'"
+            )
+            return result
+        except XiansServerError as e:
+            if e.status_code == 400:
+                logger.error(
+                    f"Bad Request (400) uploading flow definition. "
+                    f"Server rejected the payload. "
+                    f"Agent: {definition.agent}, WorkflowType: {definition.workflow_type}. "
+                    f"Response: {e.response_body}"
+                )
+            raise
+
     async def upload_agent_definition(self, definition: AgentDefinition) -> str:
         """
         Upload agent definition to Xians Server (idempotent).
+
+        Deprecated: Use upload_flow_definition instead.
+        This method is retained for backward compatibility.
         """
         content = definition.model_dump_json(exclude={"hash", "agent_key"})
         definition_hash = compute_hash(content)
@@ -152,7 +242,6 @@ class XiansServerClient:
                 "/api/agent/definitions",
                 json=definition.model_dump(mode="json"),
             )
-            response.raise_for_status()
             result = response.json()
             agent_key = result.get("agent_key", definition.name)
 
@@ -161,18 +250,11 @@ class XiansServerClient:
 
             logger.info(f"Successfully uploaded agent definition: {agent_key}")
             return agent_key
-        except httpx.HTTPStatusError as e:
-            raise XiansServerError(
-                f"Failed to upload agent definition: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
-                cause=e,
+        except XiansServerError as e:
+            logger.error(
+                f"Failed to upload agent definition '{definition.name}': {e.status_code}"
             )
-        except Exception as e:
-            raise XiansServerError(
-                f"Unexpected error uploading agent definition: {str(e)}",
-                cause=e,
-            )
+            raise
 
     async def upload_workflow_definition(
         self,
@@ -181,6 +263,9 @@ class XiansServerClient:
     ) -> str:
         """
         Upload workflow definition to Xians Server (idempotent).
+
+        Deprecated: Use upload_flow_definition instead.
+        This method is retained for backward compatibility.
 
         Args:
             agent_definition: The agent definition (needed for system_scoped flag).
@@ -213,9 +298,7 @@ class XiansServerClient:
                 "POST",
                 "/api/agent/definitions",
                 json=payload,
-                headers={"Content-Type": "application/json"},
             )
-            response.raise_for_status()
             result = response.json()
             workflow_id = result.get("workflow_id", workflow_definition.name)
 
@@ -224,34 +307,120 @@ class XiansServerClient:
 
             logger.info(f"Successfully uploaded workflow definition: {workflow_id}")
             return workflow_id
-        except httpx.HTTPStatusError as e:
-            # Enhanced error handling for 400 Bad Request
-            error_msg = f"Failed to upload workflow definition: {e.response.status_code}"
-            response_text = e.response.text
-
-            if e.response.status_code == 400:
-                # Log the payload keys (not full values to avoid exposing secrets)
-                payload_keys = list(payload.keys())
-                error_msg = (
-                    f"Bad Request (400) uploading workflow definition to /api/agent/definitions. "
-                    f"Server rejected the payload. "
-                    f"Payload keys sent: {payload_keys}. "
-                    f"Server response: {response_text}"
+        except XiansServerError as e:
+            if e.status_code == 400:
+                logger.error(
+                    f"Bad Request (400) uploading workflow definition. "
+                    f"Server rejected the payload for workflow '{workflow_definition.name}'. "
+                    f"Response: {e.response_body}"
                 )
-                logger.error(error_msg)
+            raise
 
-            raise XiansServerError(
-                error_msg,
-                status_code=e.response.status_code,
-                response_body=response_text,
-                cause=e,
-            )
-        except Exception as e:
-            raise XiansServerError(
-                f"Unexpected error uploading workflow definition: {str(e)}",
-                cause=e,
-            )
+    # ========== Conversation Outbound Endpoints (B2) ==========
 
+    async def send_outbound_chat(self, request: ChatOrDataRequest) -> dict[str, Any]:
+        """
+        Send outbound chat message to participant.
+
+        Implements POST /api/agent/conversation/outbound/chat per server contract.
+
+        Args:
+            request: ChatOrDataRequest with participantId and optional fields.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+        logger.debug(f"Sending outbound chat to participant: {request.participant_id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/conversation/outbound/chat",
+            json=payload,
+        )
+        return response.json()
+
+    async def send_outbound_data(self, request: ChatOrDataRequest) -> dict[str, Any]:
+        """
+        Send outbound data to participant.
+
+        Implements POST /api/agent/conversation/outbound/data per server contract.
+
+        Args:
+            request: ChatOrDataRequest with participantId and optional fields.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+        logger.debug(f"Sending outbound data to participant: {request.participant_id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/conversation/outbound/data",
+            json=payload,
+        )
+        return response.json()
+
+    async def send_outbound_webhook(self, request: ChatOrDataRequest) -> dict[str, Any]:
+        """
+        Send outbound webhook to participant.
+
+        Implements POST /api/agent/conversation/outbound/webhook per server contract.
+
+        Args:
+            request: ChatOrDataRequest with participantId and optional fields.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+        logger.debug(f"Sending outbound webhook to participant: {request.participant_id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/conversation/outbound/webhook",
+            json=payload,
+        )
+        return response.json()
+
+    async def send_handoff(self, request: HandoffRequest) -> dict[str, Any]:
+        """
+        Send handoff to target agent/human.
+
+        Implements POST /api/agent/conversation/outbound/handoff per server contract.
+
+        Args:
+            request: HandoffRequest with participantId, target, and optional fields.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+        logger.debug(
+            f"Sending handoff from participant {request.participant_id} to {request.target}"
+        )
+
+        response = await self._request(
+            "POST",
+            "/api/agent/conversation/outbound/handoff",
+            json=payload,
+        )
+        return response.json()
+
+    # Legacy method for backward compatibility
     async def send_outbound_message(
         self,
         conversation_id: str,
@@ -259,46 +428,191 @@ class XiansServerClient:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """
-        Send an outbound message to a conversation.
+        Send an outbound message to a conversation (legacy).
+
+        Deprecated: Use send_outbound_chat instead.
         """
-        payload = {
-            "conversation_id": conversation_id,
-            "message": message,
-            "metadata": metadata or {},
-        }
+        request = ChatOrDataRequest(
+            participant_id=conversation_id,
+            text=message,
+            data=metadata,
+        )
+        await self.send_outbound_chat(request)
+        logger.debug(f"Successfully sent outbound message to conversation {conversation_id}")
 
-        try:
-            response = await self._request(
-                "POST",
-                "/api/agent/conversation/outbound",
-                json=payload,
-            )
-            logger.debug(f"Successfully sent outbound message to conversation {conversation_id}")
-        except httpx.HTTPStatusError as e:
-            raise XiansServerError(
-                f"Failed to send outbound message: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
-                cause=e,
-            )
-        except Exception as e:
-            raise XiansServerError(
-                f"Unexpected error sending outbound message: {str(e)}",
-                cause=e,
+    # ========== Usage Reporting Endpoint (B3) ==========
+
+    async def report_usage(self, request: UsageReportRequest) -> dict[str, Any]:
+        """
+        Report usage/token consumption to Xians Server.
+
+        Implements POST /api/agent/usage/report per server contract.
+
+        Args:
+            request: UsageReportRequest with token counts and optional metadata.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails or validation fails.
+        """
+        # Validate that at least one counter is > 0
+        if (
+            request.prompt_tokens == 0
+            and request.completion_tokens == 0
+            and request.total_tokens == 0
+            and request.message_count == 0
+        ):
+            logger.warning(
+                "Usage report with all zero counts submitted. "
+                "At least one counter should be > 0."
             )
 
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+        logger.debug(
+            f"Reporting usage: promptTokens={request.prompt_tokens}, "
+            f"completionTokens={request.completion_tokens}, "
+            f"messageCount={request.message_count}"
+        )
+
+        response = await self._request(
+            "POST",
+            "/api/agent/usage/report",
+            json=payload,
+        )
+        return response.json()
+
+    # Legacy method for backward compatibility
     async def send_usage_event(self, event: dict[str, Any]) -> None:
         """
-        Send a usage event to Xians Server.
+        Send a usage event to Xians Server (legacy).
+
+        Deprecated: Use report_usage with UsageReportRequest instead.
         """
         try:
             await self._request("POST", "/api/agent/usage", json=event)
-            logger.debug("Successfully sent usage event")
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Failed to send usage event: {e.response.status_code}")
-        except Exception as e:
-            logger.warning(f"Unexpected error sending usage event: {str(e)}")
+            logger.debug("Successfully sent usage event (legacy endpoint)")
+        except XiansServerError:
+            logger.warning("Failed to send usage event to legacy endpoint /api/agent/usage")
+            # Do not re-raise for backward compatibility
 
+    # ========== Knowledge Endpoints (B4) ==========
+
+    async def get_latest_knowledge(self, name: str, agent: str) -> dict[str, Any]:
+        """
+        Get latest knowledge by name and agent.
+
+        Implements GET /api/agent/knowledge/latest per server contract.
+
+        Args:
+            name: Knowledge name (required).
+            agent: Agent identifier (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        logger.debug(f"Fetching latest knowledge: name={name}, agent={agent}")
+
+        response = await self._request(
+            "GET",
+            "/api/agent/knowledge/latest",
+            params={"name": name, "agent": agent},
+        )
+        return response.json()
+
+    async def list_knowledge(self, agent: str) -> dict[str, Any]:
+        """
+        List all knowledge for an agent.
+
+        Implements GET /api/agent/knowledge/list per server contract.
+
+        Args:
+            agent: Agent identifier (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        logger.debug(f"Listing knowledge for agent: {agent}")
+
+        response = await self._request(
+            "GET",
+            "/api/agent/knowledge/list",
+            params={"agent": agent},
+        )
+        return response.json()
+
+    async def create_knowledge(
+        self,
+        name: str,
+        agent: str,
+        type: str,
+        content: str,
+    ) -> dict[str, Any]:
+        """
+        Create new knowledge.
+
+        Implements POST /api/agent/knowledge per server contract.
+
+        Args:
+            name: Knowledge name (required).
+            agent: Agent identifier (required).
+            type: Knowledge type (required).
+            content: Knowledge content (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {
+            "name": name,
+            "agent": agent,
+            "type": type,
+            "content": content,
+        }
+        logger.debug(f"Creating knowledge: name={name}, agent={agent}, type={type}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/knowledge",
+            json=payload,
+        )
+        return response.json()
+
+    async def delete_knowledge(self, name: str, agent: str) -> dict[str, Any]:
+        """
+        Delete knowledge by name and agent.
+
+        Implements DELETE /api/agent/knowledge per server contract.
+
+        Args:
+            name: Knowledge name (required).
+            agent: Agent identifier (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        logger.debug(f"Deleting knowledge: name={name}, agent={agent}")
+
+        response = await self._request(
+            "DELETE",
+            "/api/agent/knowledge",
+            params={"name": name, "agent": agent},
+        )
+        return response.json()
+
+    # Legacy method for backward compatibility
     async def fetch_knowledge(
         self,
         query: str,
@@ -306,49 +620,268 @@ class XiansServerClient:
         metadata_filter: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Query knowledge base.
+        Query knowledge base (legacy).
+
+        Deprecated: Use list_knowledge or get_latest_knowledge instead.
+        This endpoint (/api/agent/knowledge/search) does not exist on the server.
+        """
+        logger.warning(
+            "fetch_knowledge is deprecated and uses non-existent /api/agent/knowledge/search endpoint. "
+            "Use list_knowledge or get_latest_knowledge instead."
+        )
+        raise XiansServerError(
+            "Knowledge search endpoint not supported. Use list_knowledge or get_latest_knowledge.",
+        )
+
+    # ========== Document Endpoints (B5) ==========
+
+    async def save_document(
+        self,
+        document: dict[str, Any],
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Save a document.
+
+        Implements POST /api/agent/documents/save per server contract.
+
+        Args:
+            document: Document data (required).
+            options: Optional save options.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
         """
         payload = {
-            "query": query,
-            "top_k": top_k,
-            "metadata_filter": metadata_filter or {},
+            "document": document,
         }
+        if options is not None:
+            payload["options"] = options
 
-        try:
-            response = await self._request("POST", "/api/agent/knowledge/search", json=payload)
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise XiansServerError(
-                f"Failed to fetch knowledge: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
-                cause=e,
-            )
-        except Exception as e:
-            raise XiansServerError(
-                f"Unexpected error fetching knowledge: {str(e)}",
-                cause=e,
-            )
+        logger.debug("Saving document")
 
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/save",
+            json=payload,
+        )
+        return response.json()
+
+    async def update_document(
+        self,
+        document: dict[str, Any],
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update a document.
+
+        Implements POST /api/agent/documents/update per server contract.
+
+        Args:
+            document: Document data with id (required).
+            options: Optional update options.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {
+            "document": document,
+        }
+        if options is not None:
+            payload["options"] = options
+
+        logger.debug("Updating document")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/update",
+            json=payload,
+        )
+        return response.json()
+
+    async def get_document(self, id: str) -> dict[str, Any]:
+        """
+        Get document by ID.
+
+        Implements POST /api/agent/documents/get per server contract.
+
+        Args:
+            id: Document ID (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {"id": id}
+        logger.debug(f"Getting document: id={id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/get",
+            json=payload,
+        )
+        return response.json()
+
+    async def get_document_by_key(self, type: str, key: str) -> dict[str, Any]:
+        """
+        Get document by type and key.
+
+        Implements POST /api/agent/documents/get-by-key per server contract.
+
+        Args:
+            type: Document type (required).
+            key: Document key (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {
+            "type": type,
+            "key": key,
+        }
+        logger.debug(f"Getting document by key: type={type}, key={key}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/get-by-key",
+            json=payload,
+        )
+        return response.json()
+
+    async def query_documents(
+        self,
+        query: dict[str, Any],
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Query documents.
+
+        Implements POST /api/agent/documents/query per server contract.
+
+        Args:
+            query: Query object (required).
+            content_type: Optional content type filter.
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {"query": query}
+        if content_type is not None:
+            payload["contentType"] = content_type
+
+        logger.debug("Querying documents")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/query",
+            json=payload,
+        )
+        return response.json()
+
+    async def delete_document(self, id: str) -> dict[str, Any]:
+        """
+        Delete document by ID.
+
+        Implements POST /api/agent/documents/delete per server contract.
+
+        Args:
+            id: Document ID (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {"id": id}
+        logger.debug(f"Deleting document: id={id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/delete",
+            json=payload,
+        )
+        return response.json()
+
+    async def delete_many_documents(self, ids: list[str]) -> dict[str, Any]:
+        """
+        Delete multiple documents by IDs.
+
+        Implements POST /api/agent/documents/delete-many per server contract.
+
+        Args:
+            ids: List of document IDs (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {"ids": ids}
+        logger.debug(f"Deleting {len(ids)} documents")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/delete-many",
+            json=payload,
+        )
+        return response.json()
+
+    async def document_exists(self, id: str) -> dict[str, Any]:
+        """
+        Check if a document exists.
+
+        Implements POST /api/agent/documents/exists per server contract.
+
+        Args:
+            id: Document ID (required).
+
+        Returns:
+            Server response as dict.
+
+        Raises:
+            XiansServerError: If the request fails.
+        """
+        payload = {"id": id}
+        logger.debug(f"Checking if document exists: id={id}")
+
+        response = await self._request(
+            "POST",
+            "/api/agent/documents/exists",
+            json=payload,
+        )
+        return response.json()
+
+    # Legacy method for backward compatibility
     async def fetch_document(self, document_id: str) -> dict[str, Any]:
         """
-        Fetch a document by ID.
+        Fetch a document by ID (legacy).
+
+        Deprecated: Use get_document instead.
+        This endpoint (GET /api/agent/documents/{id}) does not exist on the server.
         """
-        try:
-            response = await self._request("GET", f"/api/agent/documents/{document_id}")
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise XiansServerError(
-                f"Failed to fetch document: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
-                cause=e,
-            )
-        except Exception as e:
-            raise XiansServerError(
-                f"Unexpected error fetching document: {str(e)}",
-                cause=e,
-            )
+        logger.warning(
+            "fetch_document uses non-existent GET /api/agent/documents/{id} endpoint. "
+            "Use get_document instead."
+        )
+        raise XiansServerError(
+            "GET /api/agent/documents/{id} endpoint not supported. Use get_document (POST) instead.",
+        )
 
     async def close(self) -> None:
         """Close the HTTP client."""

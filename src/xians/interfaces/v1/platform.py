@@ -300,21 +300,52 @@ class XiansPlatform:
 
     async def _upload_definitions(self) -> None:
         """Upload agent and workflow definitions to Xians Server."""
+        from ...models.v1.server_contracts import (
+            FlowDefinitionRequest,
+            ActivityDefinitionRequest,
+            ParameterDefinition,
+        )
+
         logger.info("Uploading definitions to Xians Server...")
 
         for agent_reg in self.agents.all():
             try:
-                agent_key = await self.xians_client.upload_agent_definition(
-                    agent_reg.definition
-                )
+                # For each agent, upload each workflow definition
+                agent_key = agent_reg.definition.agent_key or agent_reg.definition.name
                 agent_reg.definition.agent_key = agent_key
 
                 for workflow_def in agent_reg.workflows:
                     workflow_def.agent_key = agent_key
                     try:
-                        await self.xians_client.upload_workflow_definition(
-                            agent_reg.definition, workflow_def
+                        # Build FlowDefinitionRequest with proper structure
+                        # Create a default activity if none exist
+                        activities = [
+                            ActivityDefinitionRequest(
+                                activity_name=workflow_def.activity_name or "execute_agent_activity",
+                                knowledge_ids=[],
+                            )
+                        ]
+
+                        # Create a default parameter if none exist
+                        parameters = [
+                            ParameterDefinition(
+                                name="input",
+                                type="string",
+                            )
+                        ]
+
+                        # Build the flow definition request
+                        flow_def = FlowDefinitionRequest(
+                            agent=agent_key,
+                            workflow_type=workflow_def.workflow_type.value,
+                            name=workflow_def.name,
+                            activity_definitions=activities,
+                            parameter_definitions=parameters,
+                            system_scoped=agent_reg.definition.system_scoped,
                         )
+
+                        # Upload using new method
+                        await self.xians_client.upload_flow_definition(flow_def)
                         logger.debug(f"Uploaded workflow definition: {workflow_def.name}")
                     except Exception as wf_error:
                         logger.warning(

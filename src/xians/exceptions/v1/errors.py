@@ -33,12 +33,16 @@ class XiansServerError(XiansError):
         *,
         status_code: int | None = None,
         response_body: str | None = None,
+        method: str | None = None,
+        url: str | None = None,
         details: dict[str, Any] | None = None,
         cause: Exception | None = None,
     ) -> None:
         super().__init__(message, details=details, cause=cause)
         self.status_code = status_code
         self.response_body = response_body
+        self.method = method
+        self.url = url
 
 
 class LLMError(XiansError):
