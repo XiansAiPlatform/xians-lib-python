@@ -12,6 +12,7 @@ from ...exceptions.v1.errors import XiansServerError
 from ...models.v1.configs import XiansServerConfig
 from ...models.v1.entities import AgentDefinition, WorkflowDefinition
 from ...utils.v1.hashing import compute_hash
+from ...utils.v1.payload_builder import build_workflow_definition_payload
 
 logger = logging.getLogger(__name__)
 
@@ -173,30 +174,50 @@ class XiansServerClient:
                 cause=e,
             )
 
-    async def upload_workflow_definition(self, definition: WorkflowDefinition) -> str:
+    async def upload_workflow_definition(
+        self,
+        agent_definition: AgentDefinition,
+        workflow_definition: WorkflowDefinition,
+    ) -> str:
         """
         Upload workflow definition to Xians Server (idempotent).
-        """
-        content = definition.model_dump_json(exclude={"hash"})
-        definition_hash = compute_hash(content)
-        definition.hash = definition_hash
 
-        cache_key = f"workflow:{definition.agent_key}:{definition.name}"
+        Args:
+            agent_definition: The agent definition (needed for system_scoped flag).
+            workflow_definition: The workflow definition to upload.
+
+        Returns:
+            Workflow identifier from the server response.
+
+        Raises:
+            XiansServerError: If the upload fails with detailed error information.
+        """
+        content = workflow_definition.model_dump_json(exclude={"hash"})
+        definition_hash = compute_hash(content)
+        workflow_definition.hash = definition_hash
+
+        cache_key = f"workflow:{workflow_definition.agent_key}:{workflow_definition.name}"
         if cache_key in self._uploaded_hashes:
             cached_hash = self._uploaded_hashes[cache_key]
             if cached_hash == definition_hash:
-                logger.debug(f"Workflow '{definition.name}' already uploaded (hash: {definition_hash})")
-                return definition.name
+                logger.debug(
+                    f"Workflow '{workflow_definition.name}' already uploaded (hash: {definition_hash})"
+                )
+                return workflow_definition.name
+
+        # Build camelCase payload for server
+        payload = build_workflow_definition_payload(agent_definition, workflow_definition)
 
         try:
             response = await self._request(
                 "POST",
-                "/api/agent/definitions/workflows",
-                json=definition.model_dump(mode="json"),
+                "/api/agent/definitions",
+                json=payload,
+                headers={"Content-Type": "application/json"},
             )
             response.raise_for_status()
             result = response.json()
-            workflow_id = result.get("workflow_id", definition.name)
+            workflow_id = result.get("workflow_id", workflow_definition.name)
 
             self._uploaded_hashes[cache_key] = definition_hash
             self._save_cache()
@@ -204,10 +225,25 @@ class XiansServerClient:
             logger.info(f"Successfully uploaded workflow definition: {workflow_id}")
             return workflow_id
         except httpx.HTTPStatusError as e:
+            # Enhanced error handling for 400 Bad Request
+            error_msg = f"Failed to upload workflow definition: {e.response.status_code}"
+            response_text = e.response.text
+
+            if e.response.status_code == 400:
+                # Log the payload keys (not full values to avoid exposing secrets)
+                payload_keys = list(payload.keys())
+                error_msg = (
+                    f"Bad Request (400) uploading workflow definition to /api/agent/definitions. "
+                    f"Server rejected the payload. "
+                    f"Payload keys sent: {payload_keys}. "
+                    f"Server response: {response_text}"
+                )
+                logger.error(error_msg)
+
             raise XiansServerError(
-                f"Failed to upload workflow definition: {e.response.status_code}",
+                error_msg,
                 status_code=e.response.status_code,
-                response_body=e.response.text,
+                response_body=response_text,
                 cause=e,
             )
         except Exception as e:

@@ -312,7 +312,9 @@ class XiansPlatform:
                 for workflow_def in agent_reg.workflows:
                     workflow_def.agent_key = agent_key
                     try:
-                        await self.xians_client.upload_workflow_definition(workflow_def)
+                        await self.xians_client.upload_workflow_definition(
+                            agent_reg.definition, workflow_def
+                        )
                         logger.debug(f"Uploaded workflow definition: {workflow_def.name}")
                     except Exception as wf_error:
                         logger.warning(
