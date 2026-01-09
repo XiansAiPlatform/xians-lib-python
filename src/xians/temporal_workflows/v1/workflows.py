@@ -8,6 +8,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 from ...models.v1.entities import AgentRequest, AgentResponse
+from .failure_unwrap import unwrap_temporal_failure
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,36 @@ _DEFAULT_ACTIVITY_TIMEOUT = timedelta(minutes=5)
 
 def _create_error_response(error: Exception) -> AgentResponse:
     """
-    Create a standardized error response.
+    Create a standardized error response with full failure unwrapping.
+
+    Unwraps Temporal exceptions to extract root cause and diagnostic details.
+
+    Args:
+        error: The exception to convert into an error response.
+
+    Returns:
+        AgentResponse with detailed error information in text and metadata.
     """
+    # Unwrap the error to get root cause and details
+    error_details = unwrap_temporal_failure(error)
+
+    root_type = error_details["root_error_type"]
+    root_message = error_details["root_error_message"]
+
+    # Create human-readable text with root cause
+    error_text = f"Agent execution failed ({root_type}): {root_message}"
+
+    # Build structured metadata
+    metadata = {
+        "is_error": True,
+        "error": root_message,
+        "error_type": root_type,
+        "error_details": error_details,
+    }
+
     return AgentResponse(
-        text=f"Agent execution failed: {str(error)}",
-        metadata={"error": str(error), "error_type": type(error).__name__},
+        text=error_text,
+        metadata=metadata,
     )
 
 

@@ -24,6 +24,39 @@ class TemporalError(XiansError):
     """Raised when Temporal workflow/activity operations fail."""
 
 
+class AgentExecutionError(XiansError):
+    """Raised when agent execution fails within a workflow/activity.
+
+    This exception captures detailed failure information from agent execution,
+    including the root cause, error chain, and Temporal context.
+
+    Attributes:
+        workflow_id: Optional workflow identifier.
+        task_queue: Optional task queue name.
+        error_details: Structured error details from failure unwrapping.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        workflow_id: str | None = None,
+        task_queue: str | None = None,
+        error_details: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        # Merge error_details into details if provided
+        merged_details = details or {}
+        if error_details:
+            merged_details["error_details"] = error_details
+
+        super().__init__(message, details=merged_details, cause=cause)
+        self.workflow_id = workflow_id
+        self.task_queue = task_queue
+        self.error_details = error_details or {}
+
+
 class XiansServerError(XiansError):
     """Raised when Xians server API calls fail."""
 
@@ -95,6 +128,7 @@ __all__ = [
     "XiansError",
     "ConfigurationError",
     "TemporalError",
+    "AgentExecutionError",
     "XiansServerError",
     "LLMError",
     "ValidationError",

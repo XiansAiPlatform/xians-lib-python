@@ -7,7 +7,7 @@ from typing import Any
 
 from temporalio.client import Client, WorkflowHandle
 
-from ...exceptions.v1.errors import TemporalError
+from ...exceptions.v1.errors import AgentExecutionError, TemporalError
 from ...models.v1.entities import AgentRequest, AgentResponse
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,20 @@ class AgentClient:
     def __init__(self, temporal_client: Client) -> None:
         self.client = temporal_client
 
+    @staticmethod
+    def _is_error_response(response: AgentResponse) -> bool:
+        """
+        Check if an AgentResponse represents an error.
+
+        Args:
+            response: The response to check.
+
+        Returns:
+            True if the response indicates an error.
+        """
+        metadata = response.metadata
+        return metadata.get("is_error") is True or "error" in metadata
+
     async def invoke(
         self,
         workflow_id: str,
@@ -28,7 +42,29 @@ class AgentClient:
         request: AgentRequest,
         workflow_type: str = "InvokeAgentWorkflow",
         timeout: timedelta = timedelta(minutes=5),
+        raise_on_agent_error: bool = False,
     ) -> AgentResponse:
+        """
+        Invoke an agent workflow and return the response.
+
+        Args:
+            workflow_id: Unique identifier for the workflow execution.
+            task_queue: Temporal task queue name.
+            request: Agent request to execute.
+            workflow_type: Workflow class name (default: InvokeAgentWorkflow).
+            timeout: Execution timeout.
+            raise_on_agent_error: If True, raise AgentExecutionError when the
+                workflow returns an error envelope. Default False for backward
+                compatibility.
+
+        Returns:
+            AgentResponse from the workflow execution.
+
+        Raises:
+            TemporalError: If workflow invocation/execution fails.
+            AgentExecutionError: If raise_on_agent_error=True and the workflow
+                returns an error response.
+        """
         try:
             handle = await self.client.start_workflow(
                 workflow_type,
@@ -41,15 +77,77 @@ class AgentClient:
             logger.info(f"Started workflow {workflow_id} on queue {task_queue}")
 
             result = await handle.result()
-            logger.info(f"Workflow {workflow_id} completed successfully")
+
+            # Check if the result is an error envelope
+            if isinstance(result, AgentResponse) and self._is_error_response(result):
+                error_msg = result.metadata.get("error", "Unknown error")
+                error_details = result.metadata.get("error_details", {})
+
+                # Extract retry-after if present
+                retry_after = error_details.get("provider_retry_after_seconds")
+                retry_info = f" (retry after {retry_after}s)" if retry_after else ""
+
+                logger.error(
+                    f"Workflow {workflow_id} completed with agent error: {error_msg}{retry_info}"
+                )
+
+                if raise_on_agent_error:
+                    raise AgentExecutionError(
+                        error_msg,
+                        workflow_id=workflow_id,
+                        task_queue=task_queue,
+                        error_details=error_details,
+                    )
+            else:
+                logger.info(f"Workflow {workflow_id} completed successfully")
 
             return result
 
+        except AgentExecutionError:
+            # Re-raise AgentExecutionError as-is
+            raise
         except Exception as e:
             raise TemporalError(
                 f"Failed to invoke workflow {workflow_id}: {str(e)}",
                 cause=e,
             )
+
+    async def invoke_or_raise(
+        self,
+        workflow_id: str,
+        task_queue: str,
+        request: AgentRequest,
+        workflow_type: str = "InvokeAgentWorkflow",
+        timeout: timedelta = timedelta(minutes=5),
+    ) -> AgentResponse:
+        """
+        Invoke an agent workflow, raising an exception on agent errors.
+
+        This is a convenience method that always sets raise_on_agent_error=True.
+        It's useful for applications that prefer exceptions over error envelopes.
+
+        Args:
+            workflow_id: Unique identifier for the workflow execution.
+            task_queue: Temporal task queue name.
+            request: Agent request to execute.
+            workflow_type: Workflow class name (default: InvokeAgentWorkflow).
+            timeout: Execution timeout.
+
+        Returns:
+            AgentResponse from the workflow execution (only on success).
+
+        Raises:
+            TemporalError: If workflow invocation/execution fails.
+            AgentExecutionError: If the workflow returns an error response.
+        """
+        return await self.invoke(
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+            request=request,
+            workflow_type=workflow_type,
+            timeout=timeout,
+            raise_on_agent_error=True,
+        )
 
     async def start_conversation(
         self,
