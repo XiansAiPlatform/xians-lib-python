@@ -1,14 +1,4 @@
 """Pydantic models representing the canonical Xians Server REST API contracts.
-
-This module defines the exact request/response models for Xians Server endpoints.
-All models serialize to camelCase JSON as required by the server.
-
-Contracts defined:
-- B1: Definitions (POST /api/agent/definitions)
-- B2: Conversation Outbound (POST endpoints for chat/data/webhook/handoff)
-- B3: Usage Reporting (POST /api/agent/usage/report)
-- B4: Knowledge (GET/POST/DELETE endpoints)
-- B5: Documents (POST-only action endpoints)
 """
 
 from typing import Any

@@ -25,27 +25,12 @@ _DEFAULT_ACTIVITY_TIMEOUT = timedelta(minutes=5)
 
 
 def _create_error_response(error: Exception) -> AgentResponse:
-    """
-    Create a standardized error response with full failure unwrapping.
-
-    Unwraps Temporal exceptions to extract root cause and diagnostic details.
-
-    Args:
-        error: The exception to convert into an error response.
-
-    Returns:
-        AgentResponse with detailed error information in text and metadata.
-    """
-    # Unwrap the error to get root cause and details
     error_details = unwrap_temporal_failure(error)
 
     root_type = error_details["root_error_type"]
     root_message = error_details["root_error_message"]
 
-    # Create human-readable text with root cause
     error_text = f"Agent execution failed ({root_type}): {root_message}"
-
-    # Build structured metadata
     metadata = {
         "is_error": True,
         "error": root_message,
@@ -61,17 +46,9 @@ def _create_error_response(error: Exception) -> AgentResponse:
 
 @workflow.defn
 class InvokeAgentWorkflow:
-    """
-    Simple invoke workflow for stateless agent execution.
-
-    """
 
     @workflow.run
     async def run(self, request: AgentRequest) -> AgentResponse:
-        """
-        Execute a single agent request.
-
-        """
         workflow.logger.info(
             f"InvokeAgentWorkflow started for agent: {request.agent_key}, "
             f"conversation: {request.conversation_id}"
@@ -99,9 +76,6 @@ class InvokeAgentWorkflow:
 
 @workflow.defn
 class ConversationWorkflow:
-    """
-    Long-running conversational workflow with session state.
-    """
 
     def __init__(self) -> None:
         self._messages: list[dict[str, Any]] = []
@@ -111,9 +85,6 @@ class ConversationWorkflow:
     def _record_message(
         self, message: str, metadata: dict[str, Any], direction: str
     ) -> None:
-        """
-        Record a message in the conversation history.
-        """
         self._messages.append(
             {
                 "message": message,
@@ -126,10 +97,6 @@ class ConversationWorkflow:
     def _create_agent_request(
         self, message: str, metadata: dict[str, Any]
     ) -> AgentRequest:
-        """
-        Create an AgentRequest from message data.
-
-        """
         return AgentRequest(
             agent_key=self._session_metadata["agent_key"],
             conversation_id=self._session_metadata["conversation_id"],
@@ -139,9 +106,6 @@ class ConversationWorkflow:
 
     @workflow.run
     async def run(self, agent_key: str, conversation_id: str) -> dict[str, Any]:
-        """
-        Start and maintain a conversation session.
-        """
         workflow.logger.info(
             f"ConversationWorkflow started for agent: {agent_key}, "
             f"conversation: {conversation_id}"
@@ -167,10 +131,6 @@ class ConversationWorkflow:
 
     @workflow.signal
     async def inbound_message(self, message: str, metadata: dict[str, Any] | None = None) -> None:
-        """
-        Handle an inbound message (fire-and-forget).
-
-        """
         workflow.logger.info(f"Received inbound message for conversation workflow")
 
         metadata = metadata or {}
@@ -183,9 +143,6 @@ class ConversationWorkflow:
     async def request_response(
         self, message: str, metadata: dict[str, Any] | None = None
     ) -> AgentResponse:
-        """
-        Handle a request-response message interaction.
-        """
         workflow.logger.info(f"Processing request_response for conversation workflow")
 
         metadata = metadata or {}
@@ -215,9 +172,6 @@ class ConversationWorkflow:
 
     @workflow.query
     def get_session_state(self) -> dict[str, Any]:
-        """
-        Query the current session state.
-        """
         return {
             "metadata": self._session_metadata,
             "message_count": len(self._messages),
@@ -228,10 +182,6 @@ class ConversationWorkflow:
 
     @workflow.query
     def get_message_history(self) -> list[dict[str, Any]]:
-        """
-        Query the message history.
-
-        """
         return self._messages
 
 

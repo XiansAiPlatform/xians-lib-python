@@ -1,6 +1,7 @@
 """Main platform facade for Xians SDK v1."""
 
 import logging
+import os
 from typing import Callable
 
 from temporalio.client import Client
@@ -310,15 +311,12 @@ class XiansPlatform:
 
         for agent_reg in self.agents.all():
             try:
-                # For each agent, upload each workflow definition
                 agent_key = agent_reg.definition.agent_key or agent_reg.definition.name
                 agent_reg.definition.agent_key = agent_key
 
                 for workflow_def in agent_reg.workflows:
                     workflow_def.agent_key = agent_key
                     try:
-                        # Build FlowDefinitionRequest with proper structure
-                        # Create a default activity if none exist
                         activities = [
                             ActivityDefinitionRequest(
                                 activity_name=workflow_def.activity_name or "execute_agent_activity",
@@ -326,7 +324,6 @@ class XiansPlatform:
                             )
                         ]
 
-                        # Create a default parameter if none exist
                         parameters = [
                             ParameterDefinition(
                                 name="input",
@@ -334,7 +331,6 @@ class XiansPlatform:
                             )
                         ]
 
-                        # Build the flow definition request
                         flow_def = FlowDefinitionRequest(
                             agent=agent_key,
                             workflow_type=workflow_def.workflow_type.value,
@@ -344,7 +340,6 @@ class XiansPlatform:
                             system_scoped=agent_reg.definition.system_scoped,
                         )
 
-                        # Upload using new method
                         await self.xians_client.upload_flow_definition(flow_def)
                         logger.debug(f"Uploaded workflow definition: {workflow_def.name}")
                     except Exception as wf_error:
@@ -412,28 +407,22 @@ class XiansPlatform:
     @staticmethod
     def _build_temporal_config_from_settings(settings: dict[str, object]) -> TemporalConfig:
         """Build TemporalConfig from server settings with .NET-aligned field names."""
-        from urllib.parse import urlparse
-        import os
+
 
         server_url_override = os.getenv("TEMPORAL_SERVER_URL")
         flow_server_url = str(server_url_override or settings.get("flowServerUrl") or "")
         if not flow_server_url:
             raise ConfigurationError("flowServerUrl missing from Temporal settings")
 
-        # Parse the URL to extract host and port
-        # Strip any scheme prefixes that might interfere with DNS resolution
         flow_server_url = flow_server_url.strip()
 
-        # Remove scheme if present (dns://, http://, https://, etc.)
         if "://" in flow_server_url:
             _, flow_server_url = flow_server_url.split("://", 1)
-
-        # Now parse as host:port
         host: str
         port: int
 
         if ":" in flow_server_url:
-            parts = flow_server_url.rsplit(":", 1)  # rsplit to handle IPv6
+            parts = flow_server_url.rsplit(":", 1)
             host = parts[0]
             try:
                 port = int(parts[1])
@@ -444,7 +433,6 @@ class XiansPlatform:
             host = flow_server_url
             port = 7233
 
-        # Clean up host (remove any trailing slashes or whitespace)
         host = host.strip().rstrip("/")
 
         if not host:
@@ -454,7 +442,6 @@ class XiansPlatform:
 
         namespace = str(settings.get("flowServerNamespace") or settings.get("namespace") or "default")
 
-        # TLS materials may be provided as base64 or raw PEM
         flow_server_cert_b64 = settings.get("flowServerCertBase64")
         flow_server_key_b64 = settings.get("flowServerPrivateKeyBase64")
         flow_server_ca_pem = settings.get("flowServerRootCaPem")
@@ -462,7 +449,6 @@ class XiansPlatform:
 
         tls_enabled = bool(flow_server_cert_b64 or flow_server_key_b64 or flow_server_ca_pem)
 
-        # Build nested TLS config
         tls_cfg = None
         if tls_enabled:
             tls_cfg = TemporalTLSConfig(
@@ -474,7 +460,6 @@ class XiansPlatform:
                 pem_is_base64=bool(flow_server_cert_b64 or flow_server_key_b64),
             )
 
-        # Preserve legacy fields for backward compatibility (tests expect these)
         return TemporalConfig(
             address=f"{host}:{port}",
             namespace=namespace,
