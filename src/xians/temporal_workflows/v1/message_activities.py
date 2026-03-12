@@ -53,6 +53,16 @@ class MessageActivities:
             },
         )
 
+        # Populate XiansContext with workflow and agent identity so that
+        # XiansContext.CurrentAgent / CurrentWorkflow resolve inside handlers.
+        XiansContext.set_workflow_id(request.workflow_id)
+        XiansContext.set_workflow_type(request.workflow_type)
+        if request.workflow_type:
+            agent_name = request.workflow_type.split(":", 1)[0]
+        else:
+            agent_name = None
+        XiansContext.set_agent_name(agent_name)
+
         XiansContext.set_tenant_id(request.tenant_id)
         XiansContext.set_participant_id(request.participant_id)
         XiansContext.set_authorization(request.authorization)
@@ -111,6 +121,10 @@ class MessageActivities:
             logger.error(f"Handler error: {e}")
             await self._send_error_to_user(request, str(e))
         finally:
+            # Clear context to avoid leaking identity across activities
+            XiansContext.set_workflow_id(None)
+            XiansContext.set_workflow_type(None)
+            XiansContext.set_agent_name(None)
             XiansContext.set_tenant_id(None)
             XiansContext.set_participant_id(None)
             XiansContext.set_authorization(None)

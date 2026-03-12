@@ -4,6 +4,8 @@ Custom Workflow Test Agent
 Demonstrates:
 - Built-in conversational workflow (Supervisor Workflow) using BuiltinWorkflow
 - Custom Temporal workflow that takes start parameters (Input Parameters UI)
+- Context Inspector workflow that validates XiansContext.CurrentAgent /
+  CurrentWorkflow resolve correctly inside a Temporal activity
 
 Run:
   cd examples/custom-workflow-test-agent
@@ -14,6 +16,7 @@ Run:
 """
 
 import asyncio
+import json
 import os
 import sys
 
@@ -22,11 +25,13 @@ from dotenv import load_dotenv
 # Add src to path for local development (matches other examples)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
+from xians.agents.core import XiansContext
 from xians.interfaces.v1.platform import XiansPlatform
 from xians.models.v1.configs import XiansOptions
 from xians.models.v1.entities import XiansAgentRegistration
 
 from custom_input_workflow import AGENT_NAME, CustomInputWorkflow
+from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
 
 
 async def main() -> None:
@@ -52,34 +57,53 @@ async def main() -> None:
             name=AGENT_NAME,
             description="Agent to test built-in + custom workflows with input parameters",
             summary="Custom workflow test agent",
-            version="0.1.0",
+            version="0.2.0",
             author="examples",
             is_template=True,
         )
     )
 
-    # Built-in conversational workflow
+    # ── 1) Built-in conversational workflow ──
     builtin_wf = agent.define_builtin_workflow(name="Supervisor Workflow")
 
     async def handle_chat(context):
+        """Echo handler that also demonstrates CurrentAgent / CurrentWorkflow access."""
         text = (context.message.text or "").strip()
         if not text:
-            await context.reply_async("Send me a chat message and I'll echo it back.")
+            await context.reply_async("Send me a message and I'll echo it back.")
             return
-        await context.reply_async(f"Echo (builtin): {text}")
+
+        # Show CurrentAgent / CurrentWorkflow in chat reply for live verification
+        try:
+            current_agent = XiansContext.CurrentAgent
+            current_wf = XiansContext.CurrentWorkflow
+            header = (
+                f"[Agent: {current_agent.name} | "
+                f"Workflow: {current_wf.workflow_type}]\n\n"
+            )
+        except Exception:
+            header = ""
+
+        await context.reply_async(f"{header}Echo: {text}")
 
     builtin_wf.on_user_chat_message(handle_chat)
 
-    # Custom workflow: start-parameter driven
+    # ── 2) Custom workflow: start-parameter driven ──
     custom_wf = agent.define_custom_workflow(CustomInputWorkflow)
-
-    # Explicit parameterDefinitions so the UI shows friendly types (C# parity-like).
-    # If you omit this, the SDK will best-effort infer from run(...) signature.
     custom_wf.set_parameter_definitions(
         [
             {"name": "input", "type": "string", "optional": False},
             {"name": "times", "type": "integer", "optional": True},
             {"name": "uppercase", "type": "boolean", "optional": True},
+        ]
+    )
+
+    # ── 3) Context Inspector workflow: validates CurrentAgent / CurrentWorkflow ──
+    inspector_wf = agent.define_custom_workflow(ContextInspectorWorkflow)
+    inspector_wf.add_activity(inspect_context)
+    inspector_wf.set_parameter_definitions(
+        [
+            {"name": "query", "type": "string", "optional": True},
         ]
     )
 

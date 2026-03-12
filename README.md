@@ -33,33 +33,48 @@ pip install xians-lib-python
 
 ```python
 import asyncio
-from temporalio import activity
-from xians.platform.v1 import XiansPlatform, XiansOptions, AgentRequest, AgentResponse
 
-# Define your agent activity (ANY framework allowed!)
-@activity.defn
-async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
-    # Your agent logic here - completely framework-agnostic
-    result = your_agent_framework.run(request.message)
-    return AgentResponse(text=result)
+from xians.interfaces.v1.platform import XiansPlatform
+from xians.models.v1.configs import XiansOptions
+from xians.models.v1.entities import XiansAgentRegistration
+
+
+async def handle_chat(context):
+    text = (context.message.text or "").strip()
+    if not text:
+        await context.reply_async("Send me a message and I'll echo it back.")
+        return
+
+    await context.reply_async(f"Echo: {text}")
+
 
 async def main():
-    # Initialize platform
+    # Initialize platform (Temporal config is fetched from Xians Server)
     platform = await XiansPlatform.initialize(
         XiansOptions(
-            server_url="https://api.xians.ai",
+            server_url="https://api.agentri.ai",
             api_key="your-api-key",
-            temporal=TemporalConfig(host="localhost", port=7233),
-            llm=LLMConfig(provider="openai", model="gpt-4", api_key="sk-..."),
         )
     )
 
     # Register agent
-    agent = platform.agents.register(name="MyAgent")
-    agent.define_invoke_workflow(activity_func=execute_agent_activity)
+    agent = platform.agents.register(
+        XiansAgentRegistration(
+            name="MyAgent",
+            description="My first agent",
+            summary="Echo demo",
+            author="you",
+            is_template=True,
+        )
+    )
+
+    # Built-in conversational workflow
+    workflow = agent.define_builtin_workflow(name="Supervisor Workflow")
+    workflow.on_user_chat_message(handle_chat)
 
     # Run workers
-    await platform.run_all()
+    await agent.run_all_async()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -84,10 +99,18 @@ if __name__ == "__main__":
 Perfect for stateless agent tasks:
 
 ```python
-agent.define_invoke_workflow(
-    name="InvokeAgent",
-    workers=2,
-    activity_func=execute_agent_activity,
+from xians.interfaces.v1.agent_client import AgentClient
+from xians.models.v1.entities import AgentRequest
+
+client: AgentClient = platform.client()
+
+response = await client.invoke(
+    workflow_id="tenant:MyAgent:InvokeWorkflow:demo-1",
+    task_queue="xians-default-user-MyAgent-InvokeWorkflow",
+    request=AgentRequest(
+        agent_key="MyAgent",
+        message="Do task",
+    ),
 )
 ```
 
@@ -96,10 +119,25 @@ agent.define_invoke_workflow(
 Long-running sessions with state management:
 
 ```python
-agent.define_conversation_workflow(
-    name="Conversation",
-    workers=1,
-    activity_func=execute_conversational_agent,
+from xians.interfaces.v1.agent_client import AgentClient
+from xians.models.v1.entities import AgentRequest
+
+client: AgentClient = platform.client()
+
+workflow_id = "tenant:MyAgent:Conversation:conv-1"
+task_queue = "xians-default-user-MyAgent-Conversation"
+
+handle = await client.start_conversation(
+    workflow_id=workflow_id,
+    task_queue=task_queue,
+    agent_key="MyAgent",
+    conversation_id="conv-1",
+)
+
+await client.send_signal(
+    workflow_id=workflow_id,
+    signal_name="user_message",
+    AgentRequest(agent_key="MyAgent", message="Hello"),
 )
 ```
 
@@ -159,21 +197,32 @@ platform = await XiansPlatform.initialize(options)
 Register agents with unique names:
 
 ```python
-agent = platform.agents.register(name="MyAgent", system_scoped=False)
+from xians.models.v1.entities import XiansAgentRegistration
+
+agent = platform.agents.register(
+    XiansAgentRegistration(
+        name="MyAgent",
+        description="My custom agent",
+        is_template=True,
+    )
+)
 ```
 
 ### Workflows
 
-Two types provided:
+Two patterns provided:
 
-- **InvokeAgentWorkflow**: One-shot request-response
-- **ConversationWorkflow**: Long-running with state
+- **Invoke-style workflow**: One-shot request/response via `AgentClient.invoke(...)`
+- **Conversational workflow**: Long-running chat via `AgentClient.start_conversation(...)` and signals
 
 ### Activities
 
 Where YOUR agent logic lives (black box to SDK):
 
 ```python
+from temporalio import activity
+from xians.models.v1.entities import AgentRequest, AgentResponse
+
 @activity.defn
 async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
     # Use ANY framework here
@@ -235,6 +284,28 @@ We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT_GU
 - Python 3.10 or higher
 - Temporal server (local or cloud)
 - (Optional) Xians Server access
+
+### Example test agents
+
+Two example agents are provided for testing:
+
+- `examples/custom-workflow-test-agent` (mixed workflows, context inspection):
+  ```bash
+  cd examples/custom-workflow-test-agent
+  pip install -r requirements.txt
+  pip install -e ../..
+  cp .env.example .env
+  python main.py
+  ```
+
+- `examples/web-search-agent` (web search with LangChain tools):
+  ```bash
+  cd examples/web-search-agent
+  pip install -r requirements.txt
+  pip install -e ../..
+  cp .env.example .env
+  python main.py
+  ```
 
 ---
 

@@ -8,7 +8,8 @@ Complete examples demonstrating different agent patterns with Xians Platform.
 |---------|------|----------|------------|
 | `basic_invoke_agent.py` | Invoke | One-shot tasks | ⭐ Beginner |
 | `conversational_agent.py` | Conversational | Multi-turn chats | ⭐⭐ Intermediate |
-| `custom-workflow-test-agent/` | Mixed | Built-in + Custom workflows (input params) | ⭐⭐ Intermediate |
+| `custom-workflow-test-agent/` | Mixed | Built-in + custom workflows (params + context) | ⭐⭐ Intermediate |
+| `web-search-agent/` | Conversational | Web search with LangChain tools | ⭐⭐ Intermediate |
 
 ## Quick Start
 
@@ -125,11 +126,19 @@ See: [CONVERSATIONAL_GUIDE.md](./CONVERSATIONAL_GUIDE.md)
 
 ### Invoke Agent
 ```python
+from xians.interfaces.v1.agent_client import AgentClient
+from xians.models.v1.entities import AgentRequest
+
 # One call, one response
+client: AgentClient = platform.client()
+
 response = await client.invoke(
-    workflow_id="task-123",
-    task_queue="...",
-    request=AgentRequest(message="Do task"),
+    workflow_id="tenant:EchoAgent:InvokeEcho:demo-1",
+    task_queue="xians-default-user-EchoAgent-InvokeEcho",
+    request=AgentRequest(
+        agent_key="EchoAgent",
+        message="Do task",
+    ),
 )
 print(response.text)
 ```
@@ -150,29 +159,37 @@ print(response.text)
 
 ### Conversational Agent
 ```python
+from xians.interfaces.v1.agent_client import AgentClient
+from xians.models.v1.entities import AgentRequest
+
+client: AgentClient = platform.client()
+
 # Start conversation
+workflow_id = "tenant:ChatBot:ChatConversation:conv-123"
+task_queue = "xians-default-user-ChatBot-ChatConversation"
+
 handle = await client.start_conversation(
-    workflow_id="chat-123",
-    task_queue="...",
+    workflow_id=workflow_id,
+    task_queue=task_queue,
     agent_key="ChatBot",
-    conversation_id="conv-456",
+    conversation_id="conv-123",
 )
 
 # Send multiple messages
 await client.send_signal(
-    workflow_id="chat-123",
+    workflow_id=workflow_id,
     signal_name="user_message",
-    AgentRequest(message="Hello"),
+    AgentRequest(agent_key="ChatBot", message="Hello"),
 )
 
 await client.send_signal(
-    workflow_id="chat-123",
+    workflow_id=workflow_id,
     signal_name="user_message",
-    AgentRequest(message="How are you?"),
+    AgentRequest(agent_key="ChatBot", message="How are you?"),
 )
 
 # End conversation
-await client.cancel_workflow("chat-123")
+await client.cancel_workflow(workflow_id)
 ```
 
 **Characteristics:**
@@ -230,16 +247,13 @@ Client          Temporal          Worker
 All examples use the same configuration structure:
 
 ```python
+from xians.interfaces.v1.platform import XiansPlatform
+from xians.models.v1.configs import XiansOptions
+
 platform = await XiansPlatform.initialize(
     XiansOptions(
         server_url="https://api.agentri.ai",
         api_key="YOUR_API_KEY",
-        temporal=None,  # Auto-fetched from Xians Server
-        llm=LLMConfig(
-            provider="google_vertex",
-            model="gemini-2.5-flash",
-            api_key="YOUR_LLM_API_KEY",
-        ),
     )
 )
 ```
@@ -262,42 +276,48 @@ export LLM_API_KEY="your-llm-key"
 
 1. **Create activity function:**
 ```python
-@activity.defn
-async def my_custom_activity(request: AgentRequest) -> AgentResponse:
-    # Your logic here
-    result = await do_something(request.message)
-    return AgentResponse(text=result)
+async def handle_chat(context):
+    text = (context.message.text or "").strip()
+    if not text:
+        await context.reply_async("Send me a message and I'll echo it back.")
+        return
+
+    await context.reply_async(f"Echo: {text}")
 ```
 
 2. **Register agent:**
 ```python
+from xians.interfaces.v1.platform import XiansPlatform
+from xians.models.v1.configs import XiansOptions
+from xians.models.v1.entities import XiansAgentRegistration
+
+platform = await XiansPlatform.initialize(
+    XiansOptions(
+        server_url="https://api.agentri.ai",
+        api_key="YOUR_API_KEY",
+    )
+)
+
 agent = platform.agents.register(
-    name="MyAgent",
-    description="My custom agent",
-    system_scoped=False,
+    XiansAgentRegistration(
+        name="MyAgent",
+        description="My custom agent",
+        summary="Demo agent",
+        author="you",
+        is_template=True,
+    )
 )
 ```
 
 3. **Define workflow:**
 ```python
-# For invoke pattern
-agent.define_invoke_workflow(
-    name="MyWorkflow",
-    workers=2,
-    activity_func=my_custom_activity,
-)
-
-# For conversational pattern
-agent.define_conversation_workflow(
-    name="MyConversation",
-    workers=2,
-    activity_func=my_custom_activity,
-)
+workflow = agent.define_builtin_workflow(name="Supervisor Workflow")
+workflow.on_user_chat_message(handle_chat)
 ```
 
 4. **Run it:**
 ```python
-await platform.run_all()
+await agent.run_all_async()
 ```
 
 ### Add LLM Integration
@@ -400,6 +420,26 @@ Before deploying to production:
 3. **Customize** - Modify the examples for your use case
 4. **Add LLM** - Integrate with OpenAI, Anthropic, or Google AI
 5. **Deploy** - Move to production with proper monitoring
+
+## Test agents
+
+- `custom-workflow-test-agent` (mixed workflows, context inspection):
+  ```bash
+  cd examples/custom-workflow-test-agent
+  pip install -r requirements.txt
+  pip install -e ../..
+  cp .env.example .env
+  python main.py
+  ```
+
+- `web-search-agent` (web search with LangChain tools):
+  ```bash
+  cd examples/web-search-agent
+  pip install -r requirements.txt
+  pip install -e ../..
+  cp .env.example .env
+  python main.py
+  ```
 
 ## Resources
 

@@ -537,7 +537,10 @@ class XiansPlatform:
 
                 all_activities = []
                 for instance in activity_instances:
-                    all_activities.extend(WorkerHost._get_activity_methods(instance))
+                    if callable(instance) and hasattr(instance, "__temporal_activity_definition"):
+                        all_activities.append(instance)
+                    else:
+                        all_activities.extend(WorkerHost._get_activity_methods(instance))
 
                 await self._worker_host.start_worker(
                     task_queue=task_queue,
