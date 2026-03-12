@@ -1,6 +1,6 @@
 from . import agent_client, platform, xians_client
 from .agent_client import AgentClient
-from .platform import AgentRegistration, AgentRegistry, XiansPlatform
+from .platform import AgentRegistration, AgentRegistry, XiansPlatform, XiansWorkflow
 from .xians_client import XiansServerClient
 
 __all__ = [
@@ -9,4 +9,5 @@ __all__ = [
     "XiansPlatform",
     "AgentRegistry",
     "AgentRegistration",
+    "XiansWorkflow",
 ]

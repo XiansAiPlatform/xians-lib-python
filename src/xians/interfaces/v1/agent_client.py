@@ -34,7 +34,7 @@ class AgentClient:
         workflow_id: str,
         task_queue: str,
         request: AgentRequest,
-        workflow_type: str = "InvokeAgentWorkflow",
+        workflow_type: str = "BuiltinWorkflow",
         timeout: timedelta = timedelta(minutes=5),
         raise_on_agent_error: bool = False,
     ) -> AgentResponse:
@@ -90,7 +90,7 @@ class AgentClient:
         workflow_id: str,
         task_queue: str,
         request: AgentRequest,
-        workflow_type: str = "InvokeAgentWorkflow",
+        workflow_type: str = "BuiltinWorkflow",
         timeout: timedelta = timedelta(minutes=5),
     ) -> AgentResponse:
         """
@@ -111,7 +111,7 @@ class AgentClient:
         task_queue: str,
         agent_key: str,
         conversation_id: str,
-        workflow_type: str = "ConversationWorkflow",
+        workflow_type: str = "BuiltinWorkflow",
     ) -> WorkflowHandle:
         """
         Start a long-running conversation workflow.

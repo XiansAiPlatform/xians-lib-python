@@ -1,4 +1,11 @@
-from typing import Literal, Optional
+"""Configuration models for Xians SDK v1.
+
+Aligned with C# XiansOptions, ServerConfiguration, and TemporalConfiguration.
+"""
+
+import os
+from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator, model_validator
 
@@ -9,6 +16,16 @@ from ...constants.v1.core import (
     DEFAULT_RETRY_ATTEMPTS,
     LLMProvider,
 )
+
+
+class CertificateInfo(BaseModel):
+    """Parsed X.509 certificate metadata. Matches C# CertificateInfo."""
+
+    tenant_id: str
+    user_id: str
+    subject: str
+    thumbprint: str
+    expires_at: datetime
 
 
 class TemporalTLSConfig(BaseModel):
@@ -44,7 +61,6 @@ class TemporalTLSConfig(BaseModel):
         )
         if any_material:
             self.enabled = True
-        # mTLS pair validation
         has_cert = bool(self.client_cert_pem or self.client_cert_path)
         has_key = bool(self.client_key_pem or self.client_key_path)
         if has_cert != has_key:
@@ -62,7 +78,6 @@ class TemporalConfig(BaseModel):
     task_queue: str = Field(default="xians-agents", description="Task queue name")
     tls: TemporalTLSConfig | None = Field(default=None, description="TLS configuration for Temporal")
 
-    # Backward compatibility fields (deprecated): host/port/tls_*; allow populate_by_name
     host: str | None = Field(default=None, description="[Deprecated] Temporal server host")
     port: int | None = Field(default=None, description="[Deprecated] Temporal server port", ge=1, le=65535)
     tls_enabled: bool = Field(default=False, description="[Deprecated] Use tls.enabled")
@@ -75,7 +90,7 @@ class TemporalConfig(BaseModel):
 
     @model_validator(mode="before")
     def compose_address(cls, values: dict) -> dict:
-        """Compose address from host/port if not provided to keep backward compatibility."""
+        """Compose address from host/port if not provided."""
         address = values.get("address")
         host = values.get("host")
         port = values.get("port")
@@ -83,18 +98,15 @@ class TemporalConfig(BaseModel):
             if port:
                 values["address"] = f"{host}:{port}"
             else:
-                # Default Temporal port 7233 if not provided
                 values["address"] = f"{host}:7233"
         return values
 
     @model_validator(mode="after")
     def populate_legacy_host_port(self) -> "TemporalConfig":
-        """Populate legacy host/port fields from address if missing to satisfy backward compatibility tests."""
+        """Populate legacy host/port fields from address."""
         try:
             if (self.host is None or self.port is None) and self.address:
-                # Parse address into host and port
                 addr = self.address
-                # Remove scheme if any (not expected but defensive)
                 if "://" in addr:
                     addr = addr.split("://", 1)[1]
                 parts = addr.split(":")
@@ -103,20 +115,17 @@ class TemporalConfig(BaseModel):
                     try:
                         self.port = self.port or int(parts[1])
                     except ValueError:
-                        # If port not int, default to 7233
                         self.port = self.port or 7233
                 else:
-                    # No explicit port; default
                     self.host = self.host or addr
                     self.port = self.port or 7233
         except Exception:
-            # Do not raise; keep fields as-is
             pass
         return self
 
     @model_validator(mode="after")
     def migrate_legacy_tls(self) -> "TemporalConfig":
-        """Map legacy TLS fields into nested TemporalTLSConfig when needed."""
+        """Map legacy TLS fields into nested TemporalTLSConfig."""
         if self.tls is None:
             any_legacy = any(
                 [
@@ -146,7 +155,7 @@ class TemporalConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Configuration for LLM provider."""
+    """Configuration for LLM provider. DEPRECATED - configure LLM in your activities."""
 
     provider: str | LLMProvider = Field(description="LLM provider name")
     model: str = Field(description="Model identifier")
@@ -178,23 +187,19 @@ class LLMConfig(BaseModel):
     @field_validator("provider", mode="before")
     @classmethod
     def coerce_provider(cls, v: str | LLMProvider) -> LLMProvider:
-        """Convert string to LLMProvider enum."""
         if isinstance(v, LLMProvider):
             return v
         if isinstance(v, str):
-            # Try to match by value (case-insensitive)
             v_lower = v.strip().lower()
             for member in LLMProvider:
                 if member.value.lower() == v_lower:
                     return member
-            # If no match, let Pydantic handle the error
             return LLMProvider(v)
         return v
 
     @field_validator("api_key", mode="before")
     @classmethod
     def coerce_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
-        """Convert plain string to SecretStr."""
         if v is None:
             return None
         if isinstance(v, SecretStr):
@@ -204,250 +209,85 @@ class LLMConfig(BaseModel):
     @field_validator("api_base", mode="before")
     @classmethod
     def coerce_api_base(cls, v: str | HttpUrl | None) -> HttpUrl | None:
-        """Convert plain string to HttpUrl."""
         if v is None:
             return None
         if isinstance(v, HttpUrl):
             return v
-        # Convert string to HttpUrl (Pydantic will handle validation)
         from pydantic import TypeAdapter
         return TypeAdapter(HttpUrl).validate_python(v)
 
 
 class XiansServerConfig(BaseModel):
-    """Configuration for Xians server connection."""
+    """Configuration for Xians server connection. Matches C# ServerConfiguration."""
 
-    server_url: str | HttpUrl = Field(description="Xians server base URL")
-    auth_mode: Literal["bearer_cert", "x_api_key"] = Field(
-        default="bearer_cert",
-        description="Authentication mode for server requests",
-    )
-    bearer_cert_base64: SecretStr | None = Field(
-        default=None,
-        description="Base64-encoded certificate used for Bearer auth",
-        alias="api_key",
-    )
-    x_api_key: SecretStr | None = Field(
-        default=None,
-        description="Legacy X-API-Key value for auth_mode='x_api_key'",
-    )
-    tenant_id: str | None = Field(default=None, description="Tenant identifier for requests")
-    timeout_seconds: int = Field(
+    server_url: str = Field(description="Xians server base URL")
+    api_key: str = Field(description="Base64-encoded PFX certificate")
+    tenant_id: Optional[str] = Field(default=None, description="Tenant identifier (from certificate)")
+    timeout_seconds: float = Field(
         default=DEFAULT_HTTP_TIMEOUT_SECONDS,
         description="Request timeout in seconds",
-        ge=1,
-    )
-    retry_attempts: int = Field(
-        default=DEFAULT_RETRY_ATTEMPTS,
-        description="Number of retry attempts",
-        ge=0,
     )
     verify_ssl: bool = Field(default=True, description="Verify SSL certificates")
 
     model_config = {"frozen": False, "populate_by_name": True}
 
-    @field_validator("server_url", mode="before")
-    @classmethod
-    def coerce_server_url(cls, v: str | HttpUrl) -> HttpUrl:
-        """Allow plain string URLs to be converted to HttpUrl."""
-        if isinstance(v, HttpUrl):
-            return v
-        # Convert string to HttpUrl (Pydantic will handle validation)
-        from pydantic import TypeAdapter
-        return TypeAdapter(HttpUrl).validate_python(v)
-
-    @field_validator("bearer_cert_base64", "x_api_key", mode="before")
-    @classmethod
-    def coerce_secret_str_fields(cls, v: str | SecretStr | None) -> SecretStr | None:
-        """Convert plain strings to SecretStr."""
-        if v is None:
-            return None
-        if isinstance(v, SecretStr):
-            return v
-        return SecretStr(str(v).strip()) if str(v).strip() else None
-
-    @field_validator("bearer_cert_base64", "x_api_key")
-    @classmethod
-    def validate_auth_value(cls, v: SecretStr | None) -> SecretStr | None:
-        """Validate auth secrets to catch common mistakes."""
-        if v is None:
-            return None
-        key_value = v.get_secret_value().strip()
-        if not key_value:
-            raise ValueError("Authentication secret cannot be empty")
-        if len(key_value) < 10:
-            raise ValueError("Authentication secret appears too short (minimum 10 characters)")
-        placeholder_patterns = [
-            "your-api-key",
-            "your_api_key",
-            "xxx",
-            "placeholder",
-            "test",
-            "example",
-        ]
-        key_lower = key_value.lower()
-        for pattern in placeholder_patterns:
-            if pattern in key_lower:
-                raise ValueError(
-                    f"Authentication secret appears to be a placeholder ('{pattern}' detected). "
-                    "Please provide a valid credential."
-                )
-        return SecretStr(key_value)
-
-    @model_validator(mode="after")
-    def validate_auth_mode(self) -> "XiansServerConfig":
-        bearer = self.bearer_cert_base64
-        x_api = self.x_api_key
-        if self.auth_mode == "bearer_cert" and not bearer:
-            raise ValueError("bearer_cert auth_mode requires bearer_cert_base64")
-        if self.auth_mode == "x_api_key" and not x_api:
-            raise ValueError("x_api_key auth_mode requires x_api_key")
-        return self
-
 
 class XiansOptions(BaseModel):
-    """
-    Main configuration options for XiansPlatform.
+    """Main configuration options for XiansPlatform.
 
-    This is the primary configuration object users provide when initializing the SDK.
+    Matches C# XiansOptions : ServerConfiguration.
+    The api_key is a Base64-encoded X.509 certificate (PFX) containing
+    tenant ID and user ID in the subject fields.
     """
 
-    server_url: str | HttpUrl = Field(description="Xians server base URL")
-    server_api_key: str | SecretStr | None = Field(
-        default=None,
-        description="Base64-encoded certificate used for server authentication",
-        alias="api_key",
-    )
-    server_auth_mode: Literal["bearer_cert", "x_api_key"] = Field(
-        default="bearer_cert",
-        description="Authentication mode for server requests",
-    )
-    server_x_api_key: str | SecretStr | None = Field(
-        default=None,
-        description="Legacy X-API-Key credential for auth_mode='x_api_key'",
-    )
-    tenant_id: str | None = Field(default=None, description="Tenant identifier")
+    server_url: str = Field(description="Xians server base URL")
+    api_key: str = Field(description="Base64-encoded X.509 certificate (PFX)")
     temporal: TemporalConfig | None = Field(
         default=None,
-        description="Temporal configuration (if None, fetch from server)",
+        description="Temporal configuration (if None, fetched from server)",
     )
-    llm: LLMConfig | dict | None = Field(
-        default=None,
-        description="[DEPRECATED] LLM configuration. No longer used by the SDK. "
-        "Configure LLM in your activities instead.",
-        deprecated=True,
-    )
-    log_level: str = Field(default="INFO", description="Logging level")
+    console_log_level: Optional[str] = Field(default=None, description="Console logging level")
+    server_log_level: Optional[str] = Field(default=None, description="Server logging level")
+    enable_tasks: bool = Field(default=False, description="Enable HITL task workflows")
+    local_mode: bool = Field(default=False, description="Local mode (no Temporal)")
+
+    # Keep for backward compat but deprecated
+    log_level: str = Field(default="INFO", description="[Deprecated] Use console_log_level")
     enable_structured_logging: bool | str = Field(
         default=False,
         description="Enable structured logging with structlog",
     )
 
+    _certificate_info: Optional[CertificateInfo] = None
+
     model_config = {"frozen": False, "populate_by_name": True}
 
-    @field_validator("server_url", mode="before")
+    @property
+    def certificate_info(self) -> CertificateInfo:
+        """Lazily parse certificate from api_key."""
+        if self._certificate_info is None:
+            from ...utils.v1.certificate import parse_certificate
+            cert_data = parse_certificate(self.api_key)
+            self._certificate_info = CertificateInfo(**cert_data)
+        return self._certificate_info
+
+    @property
+    def certificate_tenant_id(self) -> str:
+        return self.certificate_info.tenant_id
+
+    @property
+    def certificate_user_id(self) -> str:
+        return self.certificate_info.user_id
+
     @classmethod
-    def coerce_server_url(cls, v: str | HttpUrl) -> HttpUrl:
-        """Allow plain string URLs to be converted to HttpUrl."""
-        if isinstance(v, HttpUrl):
-            return v
-        # Convert string to HttpUrl (Pydantic will handle validation)
-        from pydantic import TypeAdapter
-        return TypeAdapter(HttpUrl).validate_python(v)
-
-    # Coerce auth mode from string (case-insensitive)
-    @field_validator("server_auth_mode", mode="before")
-    @classmethod
-    def normalize_auth_mode(cls, v: str | Literal["bearer_cert", "x_api_key"]) -> str:
-        if isinstance(v, str):
-            val = v.strip().lower().replace("-", "_")
-            if val in {"bearer_cert", "x_api_key"}:
-                return val
-        return v
-
-    # Convert and validate server_api_key
-    @field_validator("server_api_key", mode="before")
-    @classmethod
-    def validate_server_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
-        """Convert and validate server API key (base64 certificate) to catch common mistakes."""
-        if v is None:
-            return None
-        if isinstance(v, SecretStr):
-            key_value = v.get_secret_value()
-        else:
-            key_value = str(v) if v is not None else ""
-        key_value = key_value.strip()
-        if not key_value:
-            raise ValueError("API key cannot be empty")
-        if len(key_value) < 10:
-            raise ValueError("API key appears to be too short (minimum 10 characters)")
-        check_value = key_value[:50].lower()
-        placeholder_patterns = [
-            "your-api-key",
-            "your_api_key",
-            "xxx",
-            "placeholder",
-            "test-key",
-            "example-key",
-        ]
-        for pattern in placeholder_patterns:
-            if pattern in check_value:
-                raise ValueError(
-                    f"API key appears to be a placeholder ('{pattern}' detected). "
-                    "Please replace with your actual API key."
-                )
-        return SecretStr(key_value)
-
-    # Convert server_x_api_key from plain strings to SecretStr
-    @field_validator("server_x_api_key", mode="before")
-    @classmethod
-    def coerce_server_x_api_key(cls, v: str | SecretStr | None) -> SecretStr | None:
-        if v is None:
-            return None
-        if isinstance(v, SecretStr):
-            return v
-        s = str(v).strip()
-        return SecretStr(s) if s else None
-
-    # Coerce enable_structured_logging from string to bool
-    @field_validator("enable_structured_logging", mode="before")
-    @classmethod
-    def coerce_bool(cls, v: bool | str | None) -> bool:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return False
-        s = str(v).strip().lower()
-        truthy = {"true", "1", "yes", "y", "on"}
-        falsy = {"false", "0", "no", "n", "off"}
-        if s in truthy:
-            return True
-        if s in falsy:
-            return False
-        # default to False for unknown strings
-        return False
-
-    @model_validator(mode="after")
-    def validate_server_auth_mode(self) -> "XiansOptions":
-        if self.server_auth_mode == "bearer_cert" and not self.server_api_key:
-            raise ValueError("server_api_key is required when server_auth_mode is 'bearer_cert'")
-        if self.server_auth_mode == "x_api_key" and not self.server_x_api_key:
-            raise ValueError("server_x_api_key is required when server_auth_mode is 'x_api_key'")
-        return self
-
-    @model_validator(mode="after")
-    def warn_llm_deprecated(self) -> "XiansOptions":
-        """Warn users if they provide LLM config (deprecated)."""
-        if self.llm is not None:
-            import warnings
-            warnings.warn(
-                "The 'llm' parameter in XiansOptions is deprecated and no longer used by the SDK. "
-                "LLM configuration and invocation should be handled entirely in your activity implementation. "
-                "This parameter will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return self
+    def from_env(cls) -> "XiansOptions":
+        """Create XiansOptions from environment variables."""
+        return cls(
+            server_url=os.environ.get("SERVER_URL") or os.environ.get("XIANS_SERVER_URL", ""),
+            api_key=os.environ.get("API_KEY") or os.environ.get("XIANS_API_KEY", ""),
+            console_log_level=os.environ.get("CONSOLE_LOG_LEVEL"),
+            server_log_level=os.environ.get("SERVER_LOG_LEVEL") or os.environ.get("API_LOG_LEVEL"),
+        )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -457,15 +297,25 @@ class XiansOptions(BaseModel):
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:
-        """Validate log level."""
         allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         upper = v.upper()
         if upper not in allowed:
             raise ValueError(f"log_level must be one of {allowed}")
         return upper
 
+    @field_validator("enable_structured_logging", mode="before")
+    @classmethod
+    def coerce_bool(cls, v: bool | str | None) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        return s in {"true", "1", "yes", "y", "on"}
+
 
 __all__ = [
+    "CertificateInfo",
     "TemporalTLSConfig",
     "TemporalConfig",
     "LLMConfig",
