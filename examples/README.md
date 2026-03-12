@@ -8,6 +8,7 @@ Complete examples demonstrating different agent patterns with Xians Platform.
 |---------|------|----------|------------|
 | `basic_invoke_agent.py` | Invoke | One-shot tasks | ⭐ Beginner |
 | `conversational_agent.py` | Conversational | Multi-turn chats | ⭐⭐ Intermediate |
+| `custom-workflow-test-agent/` | Mixed | Built-in + Custom workflows (input params) | ⭐⭐ Intermediate |
 
 ## Quick Start
 

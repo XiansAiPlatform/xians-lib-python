@@ -1,4 +1,7 @@
-"""Core constants and enumerations for Xians SDK v1."""
+"""Core constants and enumerations for Xians SDK v1.
+
+API paths aligned with C# HttpClientService endpoints.
+"""
 
 from enum import Enum
 
@@ -51,6 +54,22 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 30
 DEFAULT_LLM_TEMPERATURE = 0.7
 DEFAULT_LLM_MAX_TOKENS = 2048
 
+# API paths matching C# HttpClientService / WorkflowDefinitionUploader / MessageService
+XIANS_API_DEFINITIONS = "/api/agent/definitions"
+XIANS_API_DEFINITIONS_CHECK = "/api/agent/definitions/check"
+XIANS_API_DEFINITIONS_AGENT = "/api/agent/definitions/agent"
+XIANS_API_SETTINGS_FLOWSERVER = "/api/agent/settings/flowserver"
+XIANS_API_OUTBOUND_CHAT = "/api/agent/conversation/outbound/chat"
+XIANS_API_OUTBOUND_DATA = "/api/agent/conversation/outbound/data"
+XIANS_API_OUTBOUND_WEBHOOK = "/api/agent/conversation/outbound/webhook"
+XIANS_API_OUTBOUND_HANDOFF = "/api/agent/conversation/outbound/handoff"
+XIANS_API_HISTORY = "/api/agent/conversation/history"
+XIANS_API_LAST_TASK_ID = "/api/agent/conversation/last-task-id"
+XIANS_API_KNOWLEDGE = "/api/agent/knowledge"
+XIANS_API_DOCUMENTS = "/api/agent/documents"
+XIANS_API_USAGE_REPORT = "/api/agent/usage/report"
+
+# Deprecated paths (kept for backward compat)
 XIANS_API_BASE_PATH = "/api/v1"
 XIANS_AGENT_PATH = f"{XIANS_API_BASE_PATH}/agents"
 XIANS_WORKFLOW_PATH = f"{XIANS_API_BASE_PATH}/workflows"
@@ -71,6 +90,19 @@ __all__ = [
     "DEFAULT_HTTP_TIMEOUT_SECONDS",
     "DEFAULT_LLM_TEMPERATURE",
     "DEFAULT_LLM_MAX_TOKENS",
+    "XIANS_API_DEFINITIONS",
+    "XIANS_API_DEFINITIONS_CHECK",
+    "XIANS_API_DEFINITIONS_AGENT",
+    "XIANS_API_SETTINGS_FLOWSERVER",
+    "XIANS_API_OUTBOUND_CHAT",
+    "XIANS_API_OUTBOUND_DATA",
+    "XIANS_API_OUTBOUND_WEBHOOK",
+    "XIANS_API_OUTBOUND_HANDOFF",
+    "XIANS_API_HISTORY",
+    "XIANS_API_LAST_TASK_ID",
+    "XIANS_API_KNOWLEDGE",
+    "XIANS_API_DOCUMENTS",
+    "XIANS_API_USAGE_REPORT",
     "XIANS_API_BASE_PATH",
     "XIANS_AGENT_PATH",
     "XIANS_WORKFLOW_PATH",

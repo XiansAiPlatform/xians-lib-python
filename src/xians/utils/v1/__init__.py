@@ -1,12 +1,4 @@
-"""
-Utility functions for Xians SDK v1.
-
-Common helpers for hashing, retries, logging, etc.
-
-Note: Exception handling is now centralized in src.middleware.v1 for enterprise-grade
-consistency. Use ExceptionHandlerMiddleware, with_exception_handling, and ExceptionHandlingContext
-from the middleware module.
-"""
+"""Utility functions for Xians SDK v1."""
 
 from . import hashing, logging_config
 from .hashing import *

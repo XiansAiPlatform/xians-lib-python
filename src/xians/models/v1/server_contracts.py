@@ -96,7 +96,7 @@ class FlowDefinitionRequest(BaseModel):
         name: Definition name (optional).
         source: Definition source (optional).
         activityDefinitions: List of activity definitions (required key, must have >= 1).
-        parameterDefinitions: List of top-level parameter definitions (required key, must have >= 1).
+        parameterDefinitions: List of top-level parameter definitions (required key, can be empty array).
         systemScoped: Whether system-scoped (optional, defaults to false).
         onboardingJson: Onboarding JSON string (optional).
     """
@@ -127,8 +127,8 @@ class FlowDefinitionRequest(BaseModel):
         serialization_alias="activityDefinitions",
     )
     parameter_definitions: list[ParameterDefinition] = Field(
-        min_length=1,
-        description="Top-level parameter definitions (required key, must have >= 1)",
+        default_factory=list,
+        description="Top-level parameter definitions (required key, can be empty)",
         serialization_alias="parameterDefinitions",
     )
     system_scoped: bool = Field(

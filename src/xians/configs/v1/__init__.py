@@ -1,7 +1,13 @@
 """Configuration models for Xians SDK v1."""
 
 from . import logging
-from ...models.v1.configs import LLMConfig, TemporalConfig, XiansOptions, XiansServerConfig
+from ...models.v1.configs import (
+    CertificateInfo,
+    LLMConfig,
+    TemporalConfig,
+    XiansOptions,
+    XiansServerConfig,
+)
 from .logging import (
     STRUCTLOG_AVAILABLE,
     LoggerMixin,
@@ -11,6 +17,7 @@ from .logging import (
 )
 
 __all__ = [
+    "CertificateInfo",
     "LLMConfig",
     "TemporalConfig",
     "XiansOptions",
