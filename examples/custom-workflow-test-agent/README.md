@@ -1,14 +1,16 @@
 # Custom Workflow Test Agent
 
-An example agent that demonstrates **both**:
+An example agent that demonstrates **three** workflow types:
 
 - A **Built-in conversational workflow** (`Supervisor Workflow`) using `BuiltinWorkflow` + `on_user_chat_message(...)`
 - A **Custom Temporal workflow** that takes **start parameters** (so the Xians UI shows **Input Parameters**)
+- A **Context Inspector workflow** that validates `XiansContext.CurrentAgent` / `CurrentWorkflow` resolve correctly inside a Temporal activity
 
 This is useful for validating that the Python SDK matches C# behavior around:
 
 - Built-in workflows uploading `parameterDefinitions: []` (no forced `input`)
 - Custom workflows uploading `parameterDefinitions` derived from the workflow `run(...)` signature (and/or explicitly set)
+- `XiansContext.CurrentAgent` / `CurrentWorkflow` resolving from Temporal activity context
 
 ## Workflows
 
@@ -16,11 +18,23 @@ This is useful for validating that the Python SDK matches C# behavior around:
 - Type: `{AgentName}:Supervisor Workflow`
 - Message type: chat (via `HandleInboundChatOrData` signal)
 - UI: chat-style interaction (no start parameters)
+- Also prints `[Agent: ... | Workflow: ...]` in the echo response to demonstrate live `CurrentAgent` / `CurrentWorkflow` access
 
 ### 2) Custom: `Custom Input Workflow`
 - Type: `{AgentName}:Custom Input Workflow`
 - Trigger: **Start workflow** with parameters (rendered by UI from `parameterDefinitions`)
+- Parameters: `input` (string), `times` (int, optional), `uppercase` (bool, optional)
 - Returns: a simple string result
+
+### 3) Custom: `Context Inspector Workflow`
+- Type: `{AgentName}:Context Inspector Workflow`
+- Trigger: **Start workflow** with a `query` string parameter
+- Returns: a JSON report containing:
+  - Current async context (`tenant_id`, `participant_id`, `workflow_id`, etc.)
+  - `CurrentAgent` details (name, system_scoped, tenant, workflow count)
+  - `CurrentWorkflow` details (type, name, workers, system_scoped, tenant)
+  - List of all registered agents and workflows
+- This proves the Python SDK's `XiansContext.CurrentAgent` / `CurrentWorkflow` properties work inside Temporal activities, matching C# behavior
 
 ## Setup
 
@@ -38,4 +52,3 @@ python main.py
 |----------|-------------|
 | `XIANS_SERVER_URL` | Xians platform server URL |
 | `XIANS_API_KEY` | Base64-encoded X.509 certificate |
-
