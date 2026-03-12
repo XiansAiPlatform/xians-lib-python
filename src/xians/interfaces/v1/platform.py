@@ -5,6 +5,7 @@ Supports agent registration, workflow definition, handler registration,
 definition upload with hash check, and Temporal worker startup.
 """
 
+import inspect
 import logging
 import os
 from typing import Any, Callable, Optional
@@ -66,6 +67,7 @@ class XiansWorkflow:
         self.inactivity_timeout = inactivity_timeout
         self._activity_instances: list = []
         self._custom_workflow_class: Optional[type] = None
+        self._parameter_definitions: list[dict[str, Any]] = []
 
         BuiltinWorkflow.register_workflow_options(
             workflow_type,
@@ -76,6 +78,52 @@ class XiansWorkflow:
         )
 
         XiansContext.register_workflow(workflow_type, self)
+
+    def set_parameter_definitions(self, parameter_definitions: list[dict[str, Any]]) -> "XiansWorkflow":
+        """Set top-level parameter definitions for this workflow definition.
+
+        C# uploads `parameterDefinitions` based on the WorkflowRun method signature for
+        custom workflows, and uploads an empty list for built-in workflows.
+        """
+        self._parameter_definitions = parameter_definitions or []
+        return self
+
+    def _infer_parameter_definitions_from_custom_workflow(self) -> list[dict[str, Any]]:
+        """Infer parameterDefinitions from a custom workflow class (best-effort)."""
+        wf_cls = self._custom_workflow_class
+        if wf_cls is None:
+            return []
+
+        run_fn = getattr(wf_cls, "run", None)
+        if run_fn is None:
+            return []
+
+        try:
+            sig = inspect.signature(run_fn)
+        except (TypeError, ValueError):
+            return []
+
+        defs: list[dict[str, Any]] = []
+        for name, param in sig.parameters.items():
+            if name == "self":
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+
+            ann = param.annotation
+            if ann is inspect._empty:
+                type_name = "Any"
+            else:
+                type_name = getattr(ann, "__name__", str(ann))
+
+            defs.append(
+                {
+                    "name": name,
+                    "type": type_name,
+                    "optional": param.default is not inspect._empty,
+                }
+            )
+        return defs
 
     def on_user_chat_message(self, handler: Callable) -> None:
         """Register a chat message handler. Matches C# XiansWorkflow.OnUserChatMessage."""
@@ -128,6 +176,12 @@ class XiansWorkflow:
         Produces the exact shape the server's FlowDefinitionRequest expects,
         including the required activityDefinitions and parameterDefinitions.
         """
+        parameter_definitions = (
+            self._parameter_definitions
+            if self._parameter_definitions
+            else self._infer_parameter_definitions_from_custom_workflow()
+        )
+
         return {
             "agent": self.agent_name,
             "workflowType": self.workflow_type,
@@ -142,7 +196,7 @@ class XiansWorkflow:
                     "parameterDefinitions": [],
                 }
             ],
-            "parameterDefinitions": [{"name": "input", "type": "string"}],
+            "parameterDefinitions": parameter_definitions,
         }
 
 
