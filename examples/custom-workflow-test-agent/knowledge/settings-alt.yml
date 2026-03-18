@@ -1,0 +1,5 @@
+agent:
+  retries: 1
+  timeoutSeconds: 15
+features:
+  demoMode: true

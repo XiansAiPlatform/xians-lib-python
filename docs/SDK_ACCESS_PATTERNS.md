@@ -80,16 +80,19 @@ workflow.on_user_chat_message(my_chat_handler)
 | Operation | C# | Python | Status |
 |----------|-----|--------|--------|
 | Agent identity | `XiansContext.CurrentAgent.Name` | `XiansContext.CurrentAgent.name` | ✅ |
-| Knowledge search | `await XiansContext.CurrentAgent.Knowledge.SearchAsync("query")` | Not exposed on agent | ❌ Gap |
+| Knowledge get | `await CurrentAgent.Knowledge.GetAsync("name")` | `await CurrentAgent.knowledge.get_async("name")` | ✅ |
+| Knowledge list | `await CurrentAgent.Knowledge.ListAsync()` | `await CurrentAgent.knowledge.list_async()` | ✅ |
+| Knowledge update | `await CurrentAgent.Knowledge.UpdateAsync(...)` | `await CurrentAgent.knowledge.update_async(...)` | ✅ |
+| Knowledge delete | `await CurrentAgent.Knowledge.DeleteAsync(...)` | `await CurrentAgent.knowledge.delete_async(...)` | ✅ |
 | Documents save | `await XiansContext.CurrentAgent.Documents.SaveAsync(document)` | Not exposed on agent | ❌ Gap |
 | Documents query | `await XiansContext.CurrentAgent.Documents.QueryAsync(...)` | Not exposed on agent | ❌ Gap |
 | Schedules (C# on Agent) | `XiansContext.CurrentAgent.Schedules.Create(...)` | Not exposed on agent | ❌ Gap |
 
-**Note:** The concept doc shows **CurrentWorkflow.Schedules**; in C# the implementation is **CurrentAgent.Schedules**. The Python lib does not yet expose Knowledge, Documents, or Schedules on `CurrentAgent`.
+**Note:** Knowledge is fully implemented (see [KNOWLEDGE.md](KNOWLEDGE.md)). Documents and Schedules are not yet exposed on `CurrentAgent`.
 
-### How to use in the agent (what exists today)
+### How to use in the agent
 
-**Access current agent (e.g. in a handler or custom activity):**
+**Access current agent and knowledge (e.g. in a handler or custom activity):**
 
 ```python
 from xians.agents.core import XiansContext
@@ -97,12 +100,19 @@ from xians.agents.core import XiansContext
 async def my_handler(context) -> None:
     agent = XiansContext.CurrentAgent
     print(agent.name)  # e.g. "MyAgent"
-    # agent.knowledge / agent.documents / agent.schedules not yet in Python
+
+    # Knowledge - fully implemented
+    knowledge = await agent.knowledge.get_async("system-instructions")
+    if knowledge:
+        print(knowledge.content)
+        print(knowledge.type)
+
+    all_knowledge = await agent.knowledge.list_async()
+    await agent.knowledge.update_async("greeting", "Hello!", type="text")
+    await agent.knowledge.delete_async("old-knowledge")
 ```
 
-**Workaround for knowledge/documents:** The HTTP API exists on `XiansServerClient` (used internally by the platform). To use knowledge or documents from an agent today you would need to call the server client directly (e.g. via a shared client from your platform or a custom activity that has access to it). A future release should add `CurrentAgent.Knowledge` and `CurrentAgent.Documents` facades to match C#.
-
-**C# comparison:** C# exposes `CurrentAgent.Knowledge`, `CurrentAgent.Documents`, `CurrentAgent.Schedules`, and `CurrentAgent.Tasks`. Python currently only exposes `CurrentAgent` (the registration object) with `name` and `system_scoped`; no Knowledge/Documents/Schedules/Tasks facades yet.
+**C# comparison:** C# exposes `CurrentAgent.Knowledge`, `CurrentAgent.Documents`, `CurrentAgent.Schedules`, and `CurrentAgent.Tasks`. Python now exposes `CurrentAgent.knowledge` (fully implemented). Documents, Schedules, and Tasks are not yet available.
 
 ---
 
@@ -215,7 +225,7 @@ There is no `XiansContext.Workflows.StartAsync`-style API; you use `AgentClient`
 | Pattern | Python | C# | Gaps / notes |
 |--------|--------|-----|----------------|
 | **UserMessageContext** | Full | Full | Aligned. |
-| **CurrentAgent** | Name only | Name, Knowledge, Documents, Schedules, Tasks | Python: add Knowledge, Documents, Schedules (and optionally Tasks) on agent. |
+| **CurrentAgent** | Name + Knowledge | Name, Knowledge, Documents, Schedules, Tasks | Knowledge aligned. Python: add Documents, Schedules (and optionally Tasks) on agent. |
 | **CurrentWorkflow** | workflow_type, registration | WorkflowType, WorkflowId, TaskQueue, (Schedules on Agent in C#) | Python: WorkflowId via context; TaskQueue via helper; no Schedules. |
 | **XiansContext** | Context + registry + ID helpers | + Messaging, A2A, Workflows | Python: no Messaging/A2A/Workflows facades; use MessageService and AgentClient where needed. |
 

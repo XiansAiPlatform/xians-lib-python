@@ -1,0 +1,6 @@
+agent:
+  retries: 2
+  timeoutSeconds: 30
+features:
+  chatEcho: true
+  contextInspector: true

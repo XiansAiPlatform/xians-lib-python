@@ -215,7 +215,7 @@ the property getter. This gives us identical ergonomics to C# static properties.
 | `XiansContext.CurrentAgent` | `XiansContext.CurrentAgent` |
 | `XiansContext.CurrentWorkflow` | `XiansContext.CurrentWorkflow` |
 | `XiansContext.CurrentAgent.Name` | `XiansContext.CurrentAgent.name` |
-| `XiansContext.CurrentAgent.Knowledge.SearchAsync()` | Not yet implemented (see [SDK_ACCESS_PATTERNS.md](SDK_ACCESS_PATTERNS.md)) |
+| `XiansContext.CurrentAgent.Knowledge.GetAsync("name")` | `XiansContext.CurrentAgent.knowledge.get_async("name")` |
 | `XiansContext.CurrentAgent.Schedules.Create()` (C# has Schedules on Agent) | Not yet implemented (see [SDK_ACCESS_PATTERNS.md](SDK_ACCESS_PATTERNS.md)) |
 | `SetCurrentAgentForTests(agent)` | `set_current_agent_for_tests(agent)` |
 | `ClearCurrentAgentForTests()` | `clear_current_agent_for_tests()` |

@@ -1,0 +1,10 @@
+{
+  "agentName": "Custom Workflow Test Agent",
+  "version": "0.2.0",
+  "capabilities": [
+    "builtin-chat-echo",
+    "custom-input-parameters",
+    "context-inspection"
+  ],
+  "owner": "examples"
+}

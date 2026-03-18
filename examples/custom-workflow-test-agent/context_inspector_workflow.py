@@ -16,7 +16,6 @@ from typing import Any
 from temporalio import activity, workflow
 
 from custom_input_workflow import AGENT_NAME
-from xians.agents.core import XiansContext
 
 
 @activity.defn(name="InspectContext")
@@ -27,6 +26,10 @@ async def inspect_context(query: str) -> str:
     the async-local context (workflow ID, workflow type, agent name, etc.)
     via MessageActivities — so the properties resolve without any manual setup.
     """
+    # Import lazily inside the activity. The workflow module is validated inside
+    # Temporal's sandbox, which restricts some transitive imports.
+    from xians.agents.core import XiansContext
+
     report: dict[str, Any] = {
         "query": query,
         "context": {},

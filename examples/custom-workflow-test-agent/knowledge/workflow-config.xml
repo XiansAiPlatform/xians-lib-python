@@ -1,0 +1,5 @@
+<workflowConfig>
+  <workflow name="Custom Input Workflow" enabled="true" />
+  <workflow name="Context Inspector Workflow" enabled="true" />
+  <defaultMode>chat</defaultMode>
+</workflowConfig>

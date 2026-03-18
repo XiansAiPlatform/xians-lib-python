@@ -9,6 +9,7 @@ Architecture:
     Xians BuiltinWorkflow
       → on_user_chat_message(handler)
         → WebSearchSubAgent.run_async(context)
+          → Loads system instructions from Knowledge (local .md file or server)
           → LangGraph ReAct agent with tools
             → DuckDuckGo web search (free, no API key needed)
             → Current date/time tool
@@ -24,21 +25,13 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+from xians.agents.core import XiansContext
+
 logger = logging.getLogger(__name__)
 
-SYSTEM_INSTRUCTIONS = """\
+DEFAULT_SYSTEM_INSTRUCTIONS = """\
 You are a helpful web search assistant. Your job is to help users find accurate,
 up-to-date information from the internet.
-
-Guidelines:
-- Use the web search tool to find current information before answering.
-- Always cite your sources by including the URL where you found the information.
-- If the search doesn't return relevant results, let the user know and suggest
-  refining their query.
-- For time-sensitive questions, always search rather than relying on your training data.
-- Summarize information clearly and concisely.
-- If the user asks a follow-up question, consider the conversation context.
-- Use the current_datetime tool when the user asks about the current date or time.
 """
 
 
@@ -63,6 +56,9 @@ def _build_tools() -> list:
 class WebSearchSubAgent:
     """LangChain-based web search sub-agent using DuckDuckGo.
 
+    Loads system instructions from Xians Knowledge (local file or server)
+    at runtime, falling back to a default prompt if not found.
+
     Mirrors the C# sub-agent pattern:
         var agent = new SecretsSubAgent(openAiApiKey, xiansAgent);
         var response = await agent.RunAsync(context);
@@ -70,6 +66,11 @@ class WebSearchSubAgent:
     Python equivalent:
         agent = WebSearchSubAgent(openai_api_key)
         response = await agent.run_async(context)
+
+    Knowledge setup (local mode):
+        Place a markdown file at:
+          knowledge/{AgentName}/system-instructions.md
+        And set KNOWLEDGE_DIR=./knowledge in your .env
     """
 
     def __init__(
@@ -78,20 +79,49 @@ class WebSearchSubAgent:
         model_name: str = "gpt-4o-mini",
         temperature: float = 0.0,
     ):
-        self._llm = ChatOpenAI(
-            model=model_name,
-            temperature=temperature,
-            api_key=openai_api_key,
-        )
+        self._openai_api_key = openai_api_key
+        self._model_name = model_name
+        self._temperature = temperature
         self._tools = _build_tools()
-        self._agent = create_react_agent(
-            self._llm,
-            tools=self._tools,
-            prompt=SYSTEM_INSTRUCTIONS,
+        self._cached_agent = None
+        self._cached_prompt: str | None = None
+
+    async def _get_system_instructions(self) -> str:
+        """Load system instructions from Knowledge, with fallback."""
+        try:
+            agent = XiansContext.CurrentAgent
+            knowledge = await agent.knowledge.get_async("system-instructions")
+            if knowledge and knowledge.content:
+                logger.info("Loaded system instructions from Knowledge")
+                return knowledge.content
+        except Exception as e:
+            logger.warning("Could not load knowledge: %s — using default prompt", e)
+
+        return DEFAULT_SYSTEM_INSTRUCTIONS
+
+    async def _get_or_create_agent(self, system_instructions: str):
+        """Create or reuse the LangGraph agent (recreate if prompt changed)."""
+        if self._cached_agent is not None and self._cached_prompt == system_instructions:
+            return self._cached_agent
+
+        llm = ChatOpenAI(
+            model=self._model_name,
+            temperature=self._temperature,
+            api_key=self._openai_api_key,
         )
+        self._cached_agent = create_react_agent(
+            llm,
+            tools=self._tools,
+            prompt=system_instructions,
+        )
+        self._cached_prompt = system_instructions
+        return self._cached_agent
 
     async def run_async(self, context) -> str:
         """Run the agent on a user message from the Xians workflow context.
+
+        Loads system instructions from Knowledge on each invocation
+        (cached after first load). Falls back to a default prompt.
 
         Args:
             context: UserMessageContext from the Xians BuiltinWorkflow handler.
@@ -109,7 +139,10 @@ class WebSearchSubAgent:
         logger.info(f"Processing search query: {user_text[:80]}...")
 
         try:
-            result = await self._agent.ainvoke(
+            system_instructions = await self._get_system_instructions()
+            agent = await self._get_or_create_agent(system_instructions)
+
+            result = await agent.ainvoke(
                 {"messages": [("user", user_text)]}
             )
 
