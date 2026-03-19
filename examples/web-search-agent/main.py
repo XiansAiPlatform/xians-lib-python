@@ -11,6 +11,11 @@ using the same pattern as the C# secrets-agent/healthcare-agent examples:
     -> on_user_chat_message(handler)
     -> run_all_async()
 
+System instructions are loaded from Knowledge at runtime. At startup, the
+agent uploads local knowledge files to the platform (matching the C# pattern
+of UploadEmbeddedResourceAsync). The knowledge file lives at:
+    knowledge/system-instructions.md
+
 Prerequisites:
     pip install langchain-openai langchain-community duckduckgo-search langgraph
 
@@ -21,6 +26,7 @@ Environment variables (.env):
 """
 
 import asyncio
+import logging
 import os
 import sys
 
@@ -34,6 +40,8 @@ from xians.models.v1.configs import XiansOptions
 from xians.models.v1.entities import XiansAgentRegistration
 
 from web_search_sub_agent import WebSearchSubAgent
+
+logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
@@ -61,36 +69,64 @@ async def main() -> None:
     # ── Step 2: Register agent (matches C# xiansPlatform.Agents.Register) ──
     xians_agent = xians_platform.agents.register(
         XiansAgentRegistration(
-            name="Web Search Agent",
+            name="Web Search Agent8",
             description=(
                 "AI-powered web search assistant that finds and summarizes "
                 "real-time information from the internet using Tavily search."
             ),
             summary="Web search agent with LangChain tools",
-            version="1.0.2",
+            version="1.0.3",
             author="99x",
             is_template=True,
         )
     )
 
-    # ── Step 3: Define workflow (matches C# DefineBuiltIn) ──
+    # ── Step 3: Upload knowledge files (matches C# UploadEmbeddedResourceAsync) ──
+    #
+    # This mirrors the C# pattern where knowledge files are uploaded to the
+    # platform at startup. At runtime, the agent fetches them with get_async().
+    knowledge_files = [
+        {
+            "resource_path": "knowledge/system-instructions.md",
+            "knowledge_name": "system-instructions",
+            "knowledge_type": "markdown",
+            "description": "System instructions for the web search agent",
+            "visible": False,
+        },
+    ]
+
+    for kf in knowledge_files:
+        try:
+            success = await xians_agent.knowledge.upload_from_file(**kf)
+            if success:
+                logger.info("Uploaded knowledge: %s", kf["knowledge_name"])
+            else:
+                logger.warning("Failed to upload knowledge: %s", kf["knowledge_name"])
+        except Exception as ex:
+            logger.warning(
+                "Failed to upload knowledge '%s': %s. Agent will continue with defaults.",
+                kf["knowledge_name"],
+                ex,
+            )
+
+    # ── Step 4: Define workflow (matches C# DefineBuiltIn) ──
     conversational_workflow = xians_agent.define_builtin_workflow(
         name="Supervisor Workflow"
     )
 
-    # ── Step 4: Create sub-agent (the LangChain agent with tools) ──
+    # ── Step 5: Create sub-agent (the LangChain agent with tools) ──
     search_sub_agent = WebSearchSubAgent(
         openai_api_key=openai_api_key,
     )
 
-    # ── Step 5: Wire up handler (matches C# OnUserChatMessage) ──
+    # ── Step 6: Wire up handler (matches C# OnUserChatMessage) ──
     async def handle_chat(context):
         response = await search_sub_agent.run_async(context)
         await context.reply_async(response)
 
     conversational_workflow.on_user_chat_message(handle_chat)
 
-    # ── Step 6: Start (matches C# RunAllAsync) ──
+    # ── Step 7: Start (matches C# RunAllAsync) ──
     await xians_agent.run_all_async()
 
 

@@ -1,0 +1,3 @@
+This is a plain text knowledge sample.
+It is uploaded with knowledge_type="text".
+Use this file to validate local text resource ingestion.

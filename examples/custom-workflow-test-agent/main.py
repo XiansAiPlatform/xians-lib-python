@@ -17,6 +17,7 @@ Run:
 
 import asyncio
 import json
+import logging
 import os
 import sys
 
@@ -32,6 +33,8 @@ from xians.models.v1.entities import XiansAgentRegistration
 
 from custom_input_workflow import AGENT_NAME, CustomInputWorkflow
 from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
+
+logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
@@ -56,12 +59,72 @@ async def main() -> None:
         XiansAgentRegistration(
             name=AGENT_NAME,
             description="Agent to test built-in + custom workflows with input parameters",
-            summary="Custom workflow test agent",
-            version="0.2.0",
+            summary="Custom workflow test agent1",
+            version="0.2.1",
             author="examples",
             is_template=True,
         )
     )
+
+    # ── Upload local knowledge files (same pattern as web-search-agent) ──
+    knowledge_files = [
+        {
+            "resource_path": "knowledge/system-instructions.md",
+            "knowledge_name": "system-instructions",
+            "knowledge_type": "markdown",
+            "description": "System instructions for custom workflow test agent",
+            "visible": False,
+        },
+        {
+            "resource_path": "knowledge/agent-profile.json",
+            "knowledge_name": "agent-profile",
+            "knowledge_type": "json",
+            "description": "Agent metadata and capabilities in JSON format",
+            "visible": True,
+        },
+        {
+            "resource_path": "knowledge/sample-notes.txt",
+            "knowledge_name": "sample-notes",
+            "knowledge_type": "text",
+            "description": "Plain text local knowledge sample",
+            "visible": True,
+        },
+        {
+            "resource_path": "knowledge/workflow-config.xml",
+            "knowledge_name": "workflow-config",
+            "knowledge_type": "xml",
+            "description": "Workflow configuration in XML format",
+            "visible": True,
+        },
+        {
+            "resource_path": "knowledge/settings.yaml",
+            "knowledge_name": "settings-yaml",
+            "knowledge_type": "yaml",
+            "description": "YAML settings knowledge sample (.yaml)",
+            "visible": True,
+        },
+        {
+            "resource_path": "knowledge/settings-alt.yml",
+            "knowledge_name": "settings-yml",
+            "knowledge_type": "yaml",
+            "description": "YAML settings knowledge sample (.yml)",
+            "visible": True,
+        },
+    ]
+
+    for kf in knowledge_files:
+        try:
+            success = await agent.knowledge.upload_from_file(**kf)
+            if success:
+                logger.info("Uploaded knowledge: %s", kf["knowledge_name"])
+            else:
+                logger.warning("Failed to upload knowledge: %s", kf["knowledge_name"])
+        except Exception as ex:
+            logger.warning(
+                "Failed to upload knowledge '%s': %s. Agent will continue.",
+                kf["knowledge_name"],
+                ex,
+            )
 
     # ── 1) Built-in conversational workflow ──
     builtin_wf = agent.define_builtin_workflow(name="Supervisor Workflow")

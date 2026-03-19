@@ -52,3 +52,24 @@ python main.py
 |----------|-------------|
 | `XIANS_SERVER_URL` | Xians platform server URL |
 | `XIANS_API_KEY` | Base64-encoded X.509 certificate |
+
+## Local Knowledge Uploads
+
+This example now follows the same startup pattern used in `web-search-agent`:
+- Define a `knowledge_files` list in `main.py`
+- Call `await agent.knowledge.upload_from_file(...)` for each local file
+
+Files uploaded from `knowledge/`:
+- `system-instructions.md` -> `markdown`
+- `agent-profile.json` -> `json`
+- `sample-notes.txt` -> `text`
+- `workflow-config.xml` -> `xml`
+- `settings.yaml` -> `yaml`
+- `settings-alt.yml` -> `yaml`
+
+Run the agent from this directory so relative knowledge paths resolve correctly:
+
+```bash
+cd examples/custom-workflow-test-agent
+python main.py
+```

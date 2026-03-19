@@ -275,23 +275,104 @@ class XiansServerClient:
         response = await self._request("POST", "/api/agent/usage/report", json=payload)
         return response.json()
 
-    # --- Knowledge Endpoints ---
+    # --- Knowledge Endpoints (aligned with C# ServerKnowledgeProvider) ---
 
-    async def get_latest_knowledge(self, name: str, agent: str) -> dict[str, Any]:
-        response = await self._request("GET", "/api/agent/knowledge/latest", params={"name": name, "agent": agent})
+    async def get_latest_knowledge(
+        self,
+        name: str,
+        agent: str,
+        tenant_id: Optional[str] = None,
+        activation_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """GET /api/agent/knowledge/latest (tenant-scoped, progressive fallback)"""
+        params: dict[str, str] = {"name": name, "agent": agent}
+        if activation_name:
+            params["activationName"] = activation_name
+        headers: dict[str, str] = {}
+        if tenant_id:
+            headers["X-Tenant-Id"] = tenant_id
+        response = await self._request("GET", "/api/agent/knowledge/latest", params=params, headers=headers)
         return response.json()
 
-    async def list_knowledge(self, agent: str) -> dict[str, Any]:
-        response = await self._request("GET", "/api/agent/knowledge/list", params={"agent": agent})
+    async def get_system_knowledge(
+        self,
+        name: str,
+        agent: str,
+        activation_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """GET /api/agent/knowledge/latest/system (system-scoped, no tenant)"""
+        params: dict[str, str] = {"name": name, "agent": agent}
+        if activation_name:
+            params["activationName"] = activation_name
+        response = await self._request("GET", "/api/agent/knowledge/latest/system", params=params)
         return response.json()
 
-    async def create_knowledge(self, name: str, agent: str, type: str, content: str) -> dict[str, Any]:
-        payload = {"name": name, "agent": agent, "type": type, "content": content}
-        response = await self._request("POST", "/api/agent/knowledge", json=payload)
+    async def list_knowledge(
+        self,
+        agent: str,
+        tenant_id: Optional[str] = None,
+        activation_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """GET /api/agent/knowledge/list"""
+        params: dict[str, str] = {"agent": agent}
+        if activation_name:
+            params["activationName"] = activation_name
+        headers: dict[str, str] = {}
+        if tenant_id:
+            headers["X-Tenant-Id"] = tenant_id
+        response = await self._request("GET", "/api/agent/knowledge/list", params=params, headers=headers)
         return response.json()
 
-    async def delete_knowledge(self, name: str, agent: str) -> dict[str, Any]:
-        response = await self._request("DELETE", "/api/agent/knowledge", params={"name": name, "agent": agent})
+    async def create_knowledge(
+        self,
+        name: str,
+        agent: str,
+        content: str,
+        type: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        system_scoped: bool = False,
+        activation_name: Optional[str] = None,
+        description: Optional[str] = None,
+        visible: bool = True,
+    ) -> dict[str, Any]:
+        """POST /api/agent/knowledge (create or update)"""
+        payload: dict[str, Any] = {
+            "name": name,
+            "agent": agent,
+            "content": content,
+            "systemScoped": system_scoped,
+            "visible": visible,
+        }
+        if type is not None:
+            payload["type"] = type
+        if tenant_id is not None:
+            payload["tenantId"] = tenant_id
+        if description is not None:
+            payload["description"] = description
+        params: dict[str, str] = {}
+        if activation_name:
+            params["activationName"] = activation_name
+        response = await self._request(
+            "POST", "/api/agent/knowledge", json=payload,
+            params=params if params else None,
+        )
+        return response.json()
+
+    async def delete_knowledge(
+        self,
+        name: str,
+        agent: str,
+        tenant_id: Optional[str] = None,
+        activation_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """DELETE /api/agent/knowledge"""
+        params: dict[str, str] = {"name": name, "agent": agent}
+        if activation_name:
+            params["activationName"] = activation_name
+        headers: dict[str, str] = {}
+        if tenant_id:
+            headers["X-Tenant-Id"] = tenant_id
+        response = await self._request("DELETE", "/api/agent/knowledge", params=params, headers=headers)
         return response.json()
 
     # --- Document Endpoints ---

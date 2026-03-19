@@ -13,6 +13,8 @@ from typing import Any, Callable, Optional
 from temporalio.client import Client
 
 from ...agents.core.xians_context import XiansContext
+from ...agents.knowledge import KnowledgeCollection
+from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
@@ -216,6 +218,7 @@ class AgentRegistration:
         self._tenant_id = tenant_id
         self._platform = platform
         self._workflows: list[XiansWorkflow] = []
+        self._knowledge: Optional[KnowledgeCollection] = None
 
         XiansContext.register_agent(registration.name, self)
 
@@ -226,6 +229,26 @@ class AgentRegistration:
     @property
     def system_scoped(self) -> bool:
         return self._registration.is_template
+
+    @property
+    def knowledge(self) -> KnowledgeCollection:
+        """Access the agent's knowledge collection (lazy-initialized).
+
+        Mirrors C# ``XiansAgent.Knowledge``, accessible as
+        ``XiansContext.CurrentAgent.knowledge``.
+        """
+        if self._knowledge is None:
+            provider = KnowledgeProviderFactory.create(
+                local_mode=self._platform.options.local_mode,
+                http_client=self._platform.xians_client._client,
+            )
+            self._knowledge = KnowledgeCollection(
+                agent_name=self.name,
+                provider=provider,
+                tenant_id=self._tenant_id or None,
+                system_scoped=self.system_scoped,
+            )
+        return self._knowledge
 
     def define_builtin_workflow(
         self,
@@ -675,4 +698,5 @@ __all__ = [
     "AgentRegistry",
     "AgentRegistration",
     "XiansWorkflow",
+    "KnowledgeCollection",
 ]
