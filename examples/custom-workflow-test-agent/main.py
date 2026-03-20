@@ -33,6 +33,7 @@ from xians.models.v1.entities import XiansAgentRegistration
 
 from custom_input_workflow import AGENT_NAME, CustomInputWorkflow
 from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
+from business_metrics_workflow import BusinessMetricsWorkflow, report_business_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,8 @@ async def main() -> None:
         XiansAgentRegistration(
             name=AGENT_NAME,
             description="Agent to test built-in + custom workflows with input parameters",
-            summary="Custom workflow test agent1",
-            version="0.2.1",
+            summary="Custom workflow test agent2",
+            version="0.2.3",
             author="examples",
             is_template=True,
         )
@@ -136,6 +137,14 @@ async def main() -> None:
             await context.reply_async("Send me a message and I'll echo it back.")
             return
 
+        # Report message received metric (tests metrics in builtin workflow)
+        try:
+            await context.metrics \
+                .with_metric("messages", "received", 1, "count") \
+                .report_async()
+        except Exception as ex:
+            logger.warning("Metrics report failed: %s", ex)
+
         # Show CurrentAgent / CurrentWorkflow in chat reply for live verification
         try:
             current_agent = XiansContext.CurrentAgent
@@ -167,6 +176,19 @@ async def main() -> None:
     inspector_wf.set_parameter_definitions(
         [
             {"name": "query", "type": "string", "optional": True},
+        ]
+    )
+
+    # ── 4) Business Metrics workflow: tests metrics API with different scenarios ──
+    metrics_wf = agent.define_custom_workflow(BusinessMetricsWorkflow)
+    metrics_wf.add_activity(report_business_metrics)
+    metrics_wf.set_parameter_definitions(
+        [
+            {
+                "name": "scenario",
+                "type": "string",
+                "optional": True,
+            },
         ]
     )
 

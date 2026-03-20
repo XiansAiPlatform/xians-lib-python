@@ -81,3 +81,7 @@ The agent has access to:
 
 - **DuckDuckGo Web Search** — Free real-time web search with snippets and links
 - **Current DateTime** — Returns the current UTC date/time
+
+## Metrics
+
+LLM token usage (prompt, completion, total) is automatically reported to the Xians metrics API after each agent response. This uses `context.metrics` with token counts extracted from the LangChain/LangGraph response metadata.

@@ -1,10 +1,11 @@
 # Custom Workflow Test Agent
 
-An example agent that demonstrates **three** workflow types:
+An example agent that demonstrates **four** workflow types:
 
 - A **Built-in conversational workflow** (`Supervisor Workflow`) using `BuiltinWorkflow` + `on_user_chat_message(...)`
 - A **Custom Temporal workflow** that takes **start parameters** (so the Xians UI shows **Input Parameters**)
 - A **Context Inspector workflow** that validates `XiansContext.CurrentAgent` / `CurrentWorkflow` resolve correctly inside a Temporal activity
+- A **Business Metrics workflow** that tests the metrics API with different scenarios (approvals, documents, emails, performance)
 
 This is useful for validating that the Python SDK matches C# behavior around:
 
@@ -35,6 +36,18 @@ This is useful for validating that the Python SDK matches C# behavior around:
   - `CurrentWorkflow` details (type, name, workers, system_scoped, tenant)
   - List of all registered agents and workflows
 - This proves the Python SDK's `XiansContext.CurrentAgent` / `CurrentWorkflow` properties work inside Temporal activities, matching C# behavior
+
+### 4) Custom: `Business Metrics Workflow`
+- Type: `{AgentName}:Business Metrics Workflow`
+- Trigger: **Start workflow** with a `scenario` string parameter
+- Scenarios: `approvals` | `documents` | `emails` | `performance` | `mixed` (default)
+- Reports different business metrics to test the Xians metrics API:
+  - **approvals**: submitted, pending counts
+  - **documents**: generated, viewed counts
+  - **emails**: sent, received counts
+  - **performance**: processing time (ms), records processed
+  - **mixed**: combined metrics with custom identifier and metadata
+- The built-in chat handler also reports `messages.received` on each echo
 
 ## Setup
 

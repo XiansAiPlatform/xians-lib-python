@@ -69,13 +69,13 @@ async def main() -> None:
     # ── Step 2: Register agent (matches C# xiansPlatform.Agents.Register) ──
     xians_agent = xians_platform.agents.register(
         XiansAgentRegistration(
-            name="Web Search Agent8",
+            name="Web Search Agent9",
             description=(
                 "AI-powered web search assistant that finds and summarizes "
                 "real-time information from the internet using Tavily search."
             ),
             summary="Web search agent with LangChain tools",
-            version="1.0.3",
+            version="1.0.4",
             author="99x",
             is_template=True,
         )

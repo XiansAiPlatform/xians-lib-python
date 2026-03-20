@@ -16,6 +16,8 @@ from ...agents.core.xians_context import XiansContext
 from ...agents.knowledge import KnowledgeCollection
 from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
+from ...agents.metrics import MetricsCollection
+from ...agents.metrics.usage_activities import UsageActivities
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
 from ...middleware.v1 import initialize_middleware
@@ -219,6 +221,7 @@ class AgentRegistration:
         self._platform = platform
         self._workflows: list[XiansWorkflow] = []
         self._knowledge: Optional[KnowledgeCollection] = None
+        self._metrics: Optional[MetricsCollection] = None
 
         XiansContext.register_agent(registration.name, self)
 
@@ -249,6 +252,21 @@ class AgentRegistration:
                 system_scoped=self.system_scoped,
             )
         return self._knowledge
+
+    @property
+    def metrics(self) -> MetricsCollection:
+        """Access the agent's metrics collection (lazy-initialized).
+
+        Mirrors C# XiansAgent.Metrics, accessible as
+        XiansContext.CurrentAgent.metrics.
+        """
+        if self._metrics is None:
+            self._metrics = MetricsCollection(
+                agent_name=self.name,
+                http_client=self._platform.xians_client,
+                platform=self._platform,
+            )
+        return self._metrics
 
     def define_builtin_workflow(
         self,
@@ -542,6 +560,7 @@ class XiansPlatform:
             return
 
         message_activities = MessageActivities(self._message_service)
+        usage_activities = UsageActivities(self.xians_client)
 
         for agent_reg in self.agents.all():
             for wf in agent_reg._workflows:
@@ -550,7 +569,10 @@ class XiansPlatform:
                 else:
                     workflow_class = create_named_builtin_workflow(wf.workflow_type)
 
-                activity_instances = [message_activities] + wf._activity_instances
+                activity_instances = [
+                    message_activities,
+                    usage_activities,
+                ] + wf._activity_instances
 
                 task_queue = build_task_queue_name(
                     workflow_type=wf.workflow_type,
