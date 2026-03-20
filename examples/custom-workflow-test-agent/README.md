@@ -5,7 +5,7 @@ An example agent that demonstrates **four** workflow types:
 - A **Built-in conversational workflow** (`Supervisor Workflow`) using `BuiltinWorkflow` + `on_user_chat_message(...)`
 - A **Custom Temporal workflow** that takes **start parameters** (so the Xians UI shows **Input Parameters**)
 - A **Context Inspector workflow** that validates `XiansContext.CurrentAgent` / `CurrentWorkflow` resolve correctly inside a Temporal activity
-- A **Business Metrics workflow** that tests the metrics API with different scenarios (approvals, documents, emails, performance)
+- A **Business Metrics workflow** that tests the metrics API with different scenarios (approvals, documents, emails, performance, tags)
 
 This is useful for validating that the Python SDK matches C# behavior around:
 
@@ -40,13 +40,14 @@ This is useful for validating that the Python SDK matches C# behavior around:
 ### 4) Custom: `Business Metrics Workflow`
 - Type: `{AgentName}:Business Metrics Workflow`
 - Trigger: **Start workflow** with a `scenario` string parameter
-- Scenarios: `approvals` | `documents` | `emails` | `performance` | `mixed` (default)
+- Scenarios: `approvals` | `documents` | `emails` | `performance` | `mixed` | `tags` (default: `mixed`)
 - Reports different business metrics to test the Xians metrics API:
   - **approvals**: submitted, pending counts
   - **documents**: generated, viewed counts
   - **emails**: sent, received counts
   - **performance**: processing time (ms), records processed
-  - **mixed**: combined metrics with custom identifier and metadata
+  - **mixed**: combined metrics with custom identifier and single metadata (`with_metadata`)
+  - **tags**: bulk metadata via `with_metadata_dict(custom_tags)` — e.g. `{"version": "2.1.0", "region": "us-east-1", "environment": "staging"}`
 - The built-in chat handler also reports `messages.received` on each echo
 
 ## Setup

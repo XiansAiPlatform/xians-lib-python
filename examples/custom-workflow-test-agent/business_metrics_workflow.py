@@ -23,6 +23,7 @@ async def report_business_metrics(scenario: str) -> str:
     - Documents (generated, viewed)
     - Emails (sent, received)
     - Performance (processing time, records processed)
+    - Tags: bulk metadata via with_metadata_dict(custom_tags)
     """
     from xians.agents.core import XiansContext
 
@@ -82,6 +83,21 @@ async def report_business_metrics(scenario: str) -> str:
             .report_async()
         return "Reported mixed business metrics with custom identifier and metadata"
 
+    if scenario == "tags":
+        custom_tags = {
+            "version": "2.1.0",
+            "region": "us-east-1",
+            "environment": "staging",
+        }
+        await metrics \
+            .with_custom_identifier("tags-demo") \
+            .with_metadata_dict(custom_tags) \
+            .with_metrics(
+                ("tags", "applied", len(custom_tags), "count"),
+            ) \
+            .report_async()
+        return f"Reported metrics with bulk metadata (with_metadata_dict): {list(custom_tags.keys())}"
+
     # Default: report workflow started
     await metrics \
         .with_metric("workflow", "started", 1, "count") \
@@ -94,7 +110,7 @@ class BusinessMetricsWorkflow:
     """Custom workflow that logs different business metrics.
 
     Start from the UI with parameter:
-      scenario: "approvals" | "documents" | "emails" | "performance" | "mixed"
+      scenario: "approvals" | "documents" | "emails" | "performance" | "mixed" | "tags"
 
     Each scenario reports different metric categories to test the metrics API.
     """
