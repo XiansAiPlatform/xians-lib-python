@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING
 
+from ...agents.core.xians_context import XiansContext
 from ...temporal_workflows.v1.models import (
     CurrentMessage,
     ProcessMessageActivityRequest,
@@ -53,6 +54,20 @@ class UserMessageContext:
     @property
     def metadata(self) -> Optional[dict[str, str]]:
         return self._metadata
+
+    @property
+    def metrics(self):
+        """Fluent builder for tracking metrics with automatic context from this message.
+
+        Matches C# context.Metrics. Use from message handlers:
+            await context.metrics
+                .with_metric("tokens", "total", 150, "tokens")
+                .report_async()
+        """
+        from ...agents.metrics import ContextAwareUsageReportBuilder
+
+        agent = XiansContext.CurrentAgent
+        return agent.metrics.track(self)
 
     async def reply_async(self, text: str, data: Any = None) -> None:
         """Send a chat reply to the user."""

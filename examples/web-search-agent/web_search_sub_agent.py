@@ -29,6 +29,69 @@ from xians.agents.core import XiansContext
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_token_usage(message) -> tuple[int, int, int] | None:
+    """Extract prompt, completion, and total tokens from LangChain message.
+
+    Handles usage_metadata (LangChain standard) and response_metadata (OpenAI).
+    """
+    def _get(obj, *keys) -> int | None:
+        if obj is None:
+            return None
+        for k in keys:
+            v = getattr(obj, k, None) if hasattr(obj, k) else (obj.get(k) if isinstance(obj, dict) else None)
+            if v is not None:
+                return int(v)
+        return None
+
+    # usage_metadata: input_tokens, output_tokens, total_tokens
+    um = getattr(message, "usage_metadata", None)
+    if um:
+        prompt = _get(um, "input_tokens")
+        completion = _get(um, "output_tokens")
+        if prompt is not None or completion is not None:
+            total = _get(um, "total_tokens") or (prompt or 0) + (completion or 0)
+            return (prompt or 0, completion or 0, total)
+
+    # response_metadata: token_usage or usage (OpenAI-style)
+    rm = getattr(message, "response_metadata", None) or {}
+    tu = rm.get("token_usage") or rm.get("usage") or {}
+    if tu:
+        prompt = _get(tu, "prompt_tokens", "input_tokens", "input_text_tokens")
+        completion = _get(tu, "completion_tokens", "output_tokens")
+        if prompt is not None or completion is not None:
+            total = _get(tu, "total_tokens") or (prompt or 0) + (completion or 0)
+            return (prompt or 0, completion or 0, total)
+
+    return None
+
+
+async def _report_llm_metrics(context, message) -> None:
+    """Report LLM token usage to Xians metrics."""
+    usage = _extract_token_usage(message)
+    if not usage:
+        return
+
+    prompt_tokens, completion_tokens, total_tokens = usage
+    model = getattr(message, "response_metadata", {}) or {}
+    if isinstance(model, dict):
+        model_name = model.get("model_name") or model.get("model") or "gpt-4o-mini"
+    else:
+        model_name = "gpt-4o-mini"
+
+    try:
+        await context.metrics \
+            .for_model(model_name) \
+            .with_metrics(
+                ("tokens", "prompt", prompt_tokens, "tokens"),
+                ("tokens", "completion", completion_tokens, "tokens"),
+                ("tokens", "total", total_tokens, "tokens"),
+            ) \
+            .report_async()
+        logger.debug("Reported LLM metrics: prompt=%s completion=%s total=%s", prompt_tokens, completion_tokens, total_tokens)
+    except Exception as ex:
+        logger.warning("Failed to report LLM metrics: %s", ex)
+
 DEFAULT_SYSTEM_INSTRUCTIONS = """\
 You are a helpful web search assistant. Your job is to help users find accurate,
 up-to-date information from the internet.
@@ -109,6 +172,7 @@ class WebSearchSubAgent:
             temperature=self._temperature,
             api_key=self._openai_api_key,
         )
+        
         self._cached_agent = create_react_agent(
             llm,
             tools=self._tools,
@@ -154,6 +218,10 @@ class WebSearchSubAgent:
                     if hasattr(last_message, "content")
                     else str(last_message)
                 )
+
+                # Report LLM token usage metrics (matches C# metrics pattern)
+                await _report_llm_metrics(context, last_message)
+
                 return response_text
 
             return "I wasn't able to generate a response. Please try rephrasing your question."

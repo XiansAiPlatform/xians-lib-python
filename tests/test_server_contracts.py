@@ -512,12 +512,10 @@ class TestXiansServerClientUsage:
         )
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"status": "recorded"}
         xians_client._request = AsyncMock(return_value=mock_response)
 
-        result = await xians_client.report_usage(req)
+        await xians_client.report_usage(req)
 
-        assert result == {"status": "recorded"}
         call_args = xians_client._request.call_args
         assert call_args[0][1] == "/api/agent/usage/report"
 
@@ -533,12 +531,12 @@ class TestXiansServerClientUsage:
         )
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"status": "recorded"}
         xians_client._request = AsyncMock(return_value=mock_response)
 
-        result = await xians_client.report_usage(req)
+        await xians_client.report_usage(req)
 
-        assert result == {"status": "recorded"}
+        call_args = xians_client._request.call_args
+        assert call_args[0][1] == "/api/agent/usage/report"
 
 
 class TestXiansServerClientKnowledge:

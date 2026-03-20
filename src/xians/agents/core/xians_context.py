@@ -110,6 +110,17 @@ class _XiansContextMeta(type):
 
         return workflow
 
+    @property
+    def Metrics(cls):
+        """Access metrics for the current agent. Matches C# XiansContext.Metrics.
+
+        Use from workflows/activities:
+            await XiansContext.Metrics
+                .with_metric("workflow", "started", 1, "count")
+                .report_async()
+        """
+        return cls.CurrentAgent.metrics
+
 
 class XiansContext(metaclass=_XiansContextMeta):
     """Central context hub for accessing all Xians SDK functionality.
@@ -162,6 +173,59 @@ class XiansContext(metaclass=_XiansContextMeta):
     @staticmethod
     def get_request_id() -> Optional[str]:
         return _current_request_id.get()
+
+    # ------------------------------------------------------------------
+    # Safe getters (never raise, return None if unavailable)
+    # Mirrors C# XiansContext.SafeTenantId, SafeParticipantId, etc.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def safe_tenant_id() -> Optional[str]:
+        """Safely get tenant ID without raising. Returns None if unavailable."""
+        try:
+            return _current_tenant_id.get() or XiansContext._extract_tenant_id_from_workflow_id()
+        except Exception:
+            return None
+
+    @staticmethod
+    def safe_participant_id() -> Optional[str]:
+        """Safely get participant ID without raising. Returns None if unavailable."""
+        try:
+            return _current_participant_id.get()
+        except Exception:
+            return None
+
+    @staticmethod
+    def safe_workflow_id() -> Optional[str]:
+        """Safely get workflow ID without raising. Returns None if unavailable."""
+        try:
+            return _current_workflow_id.get() or XiansContext._get_from_temporal_context("workflow_id")
+        except Exception:
+            return None
+
+    @staticmethod
+    def safe_workflow_type() -> Optional[str]:
+        """Safely get workflow type without raising. Returns None if unavailable."""
+        try:
+            return XiansContext._resolve_workflow_type()
+        except Exception:
+            return None
+
+    @staticmethod
+    def safe_agent_name() -> Optional[str]:
+        """Safely get agent name without raising. Returns None if unavailable."""
+        try:
+            return XiansContext._resolve_agent_name()
+        except Exception:
+            return None
+
+    @staticmethod
+    def safe_id_postfix() -> Optional[str]:
+        """Safely get id postfix without raising. Returns None if unavailable."""
+        try:
+            return _current_id_postfix.get() or XiansContext._parse_id_postfix_from_workflow_id()
+        except Exception:
+            return None
 
     @staticmethod
     def set_request_id(value: Optional[str]) -> None:

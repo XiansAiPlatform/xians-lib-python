@@ -270,10 +270,23 @@ class XiansServerClient:
         response = await self._request("POST", "/api/agent/conversation/outbound/handoff", json=payload)
         return response.json()
 
-    async def report_usage(self, request: UsageReportRequest) -> dict[str, Any]:
+    async def report_usage(self, request: UsageReportRequest) -> None:
+        """Report usage (legacy format: promptTokens, completionTokens, etc.).
+
+        The server returns HTTP 202 Accepted with an empty body on success.
+        """
         payload = request.model_dump(by_alias=True, exclude_none=True)
-        response = await self._request("POST", "/api/agent/usage/report", json=payload)
-        return response.json()
+        await self._request("POST", "/api/agent/usage/report", json=payload)
+
+    async def report_metrics_usage(self, payload: dict[str, Any]) -> None:
+        """Report flexible metrics (category/type/value/unit format).
+
+        Matches C# MetricsService.ReportAsync. Accepts serialized UsageReportRequest
+        from agents.metrics.models (tenantId, participantId, metrics array, etc.).
+
+        The server returns HTTP 202 Accepted with an empty body on success.
+        """
+        await self._request("POST", "/api/agent/usage/report", json=payload)
 
     # --- Knowledge Endpoints (aligned with C# ServerKnowledgeProvider) ---
 
