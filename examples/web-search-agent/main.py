@@ -50,6 +50,8 @@ async def main() -> None:
     openai_api_key = os.environ.get("OPENAI_API_KEY")
     server_url = os.environ.get("XIANS_SERVER_URL")
     xians_api_key = os.environ.get("XIANS_API_KEY")
+    console_log_level = os.environ.get("CONSOLE_LOG_LEVEL", "DEBUG")
+    server_log_level = os.environ.get("SERVER_LOG_LEVEL", "Information")
 
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY not found in environment variables")
@@ -63,6 +65,8 @@ async def main() -> None:
         XiansOptions(
             server_url=server_url,
             api_key=xians_api_key,
+            console_log_level=console_log_level,
+            server_log_level=server_log_level,
         )
     )
 
