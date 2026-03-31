@@ -82,7 +82,7 @@ class MessageActivities:
                 and agent_name
             ):
                 if not request.workflow_run_id:
-                    logger.warning(
+                    logger.debug(
                         "WorkflowLogEmitter: workflow_run_id is missing/empty; emitting without workflowRunId"
                     )
                 emitter = WorkflowLogEmitter(

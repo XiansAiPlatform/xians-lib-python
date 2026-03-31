@@ -30,11 +30,21 @@ class WorkflowLogService:
     def __init__(self, xians_client: "XiansServerClient", logger_instance: logging.Logger | None = None) -> None:
         self._client = xians_client
         self._logger = logger_instance or logger
+        self._prefer_numeric_levels = False
 
     async def upload_batch_async(self, records: list[WorkflowLogRequest]) -> None:
         """Upload a batch of log records (best-effort)."""
         if not records:
             return
+
+        if self._prefer_numeric_levels:
+            payload_number = [r.to_api_dict(level_format="number") for r in records]
+            try:
+                await self._client.upload_agent_logs(payload_number)
+                return
+            except Exception as ex:
+                self._logger.warning("Failed to upload workflow logs: %s", ex, exc_info=True)
+                return
 
         payload_name = [r.to_api_dict(level_format="name") for r in records]
         try:
@@ -46,6 +56,7 @@ class WorkflowLogService:
                 payload_number = [r.to_api_dict(level_format="number") for r in records]
                 try:
                     await self._client.upload_agent_logs(payload_number)
+                    self._prefer_numeric_levels = True
                     self._logger.info(
                         "Uploaded workflow logs using numeric level fallback (%s records)",
                         len(records),

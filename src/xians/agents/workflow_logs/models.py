@@ -12,7 +12,7 @@ Python is responsible for providing:
 from __future__ import annotations
 
 import enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -60,6 +60,8 @@ class WorkflowLogRequest(BaseModel):
     activation: str | None = Field(default=None, description="Activation / idPostfix")
     participant_id: str | None = Field(default=None, serialization_alias="participantId")
     tenant_id: str | None = Field(default=None, serialization_alias="tenantId")
+    trace_id: str | None = Field(default=None, serialization_alias="traceId")
+    span_id: str | None = Field(default=None, serialization_alias="spanId")
 
     # Error details
     exception: str | None = Field(default=None, description="Stringified stack trace or exception")
@@ -69,7 +71,7 @@ class WorkflowLogRequest(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-    def to_api_dict(self, *, level_format: str = "name") -> dict[str, Any]:
+    def to_api_dict(self, *, level_format: Literal["name", "number"] = "name") -> dict[str, Any]:
         """Serialize for ingestion payload.
 
         Args:

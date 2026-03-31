@@ -36,7 +36,7 @@ class MessageProcessor:
         message: InboundMessage,
         workflow_id: str,
         workflow_type: str,
-        workflow_run_id: str,
+        workflow_run_id: str | None,
     ) -> None:
         """Process a single inbound message.
 
