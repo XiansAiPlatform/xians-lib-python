@@ -15,6 +15,7 @@ from ...agents.messaging.user_message_context import UserMessageContext
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
 from ...agents.messaging.message_service import MessageService
 from ...agents.core.xians_context import XiansContext
+from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,9 @@ logger = logging.getLogger(__name__)
 class MessageActivities:
     """Temporal activities for message processing. Matches C# MessageActivities."""
 
-    def __init__(self, message_service: MessageService):
+    def __init__(self, message_service: MessageService, workflow_logs_service: WorkflowLogService | None = None):
         self._message_service = message_service
+        self._workflow_logs_service = workflow_logs_service
 
     @activity.defn(name="ProcessAndSendMessage")
     async def process_and_send_message(
@@ -53,6 +55,8 @@ class MessageActivities:
             },
         )
 
+        workflow_run_id = request.workflow_run_id
+
         # Populate XiansContext with workflow and agent identity so that
         # XiansContext.CurrentAgent / CurrentWorkflow resolve inside handlers.
         XiansContext.set_workflow_id(request.workflow_id)
@@ -68,7 +72,37 @@ class MessageActivities:
         XiansContext.set_authorization(request.authorization)
         XiansContext.set_request_id(request.request_id)
 
+        # Create a workflow log emitter (best-effort).
+        emitter: WorkflowLogEmitter | None = None
         try:
+            if (
+                self._workflow_logs_service
+                and request.workflow_id
+                and request.workflow_type
+                and agent_name
+            ):
+                if not request.workflow_run_id:
+                    logger.warning(
+                        "WorkflowLogEmitter: workflow_run_id is missing/empty; emitting without workflowRunId"
+                    )
+                emitter = WorkflowLogEmitter(
+                    log_service=self._workflow_logs_service,
+                    agent=agent_name,
+                    workflow_type=request.workflow_type,
+                    workflow_id=request.workflow_id,
+                    workflow_run_id=workflow_run_id,
+                    activation=XiansContext.safe_id_postfix(),
+                    participant_id=request.participant_id,
+                    tenant_id=request.tenant_id or XiansContext.safe_tenant_id(),
+                )
+        except Exception:
+            logger.warning("Failed to initialize WorkflowLogEmitter", exc_info=True)
+
+        try:
+            if emitter:
+                # Minimum viable logging: at least one Information log for this run.
+                await emitter.emit_info(f"Workflow message received (type={message_type})")
+
             if message_type in ("chat", "data", "file"):
                 context = UserMessageContext(
                     request=request,
@@ -82,7 +116,11 @@ class MessageActivities:
                 }.get(message_type)
 
                 if handler:
+                    if emitter:
+                        await emitter.emit_info("Dispatching user handler")
                     await handler(context)
+                    if emitter:
+                        await emitter.emit_info("User handler completed successfully")
 
             elif message_type == "webhook":
                 webhook_msg = WebhookMessage(
@@ -97,6 +135,8 @@ class MessageActivities:
                 webhook_context = WebhookContext(webhook=webhook_msg)
 
                 if metadata.webhook_handler:
+                    if emitter:
+                        await emitter.emit_info("Dispatching webhook handler")
                     await metadata.webhook_handler(webhook_context)
 
                 send_req = SendMessageRequest(
@@ -116,11 +156,17 @@ class MessageActivities:
                     tenant_id=request.tenant_id,
                 )
                 await self._message_service.send_async(send_req)
+                if emitter:
+                    await emitter.emit_info("Webhook reply sent successfully")
 
         except Exception as e:
+            if emitter:
+                await emitter.emit_error("Workflow handler failed", exc=e)
             logger.error(f"Handler error: {e}")
             await self._send_error_to_user(request, str(e))
         finally:
+            if emitter:
+                await emitter.flush()
             # Clear context to avoid leaking identity across activities
             XiansContext.set_workflow_id(None)
             XiansContext.set_workflow_type(None)

@@ -36,6 +36,7 @@ class MessageProcessor:
         message: InboundMessage,
         workflow_id: str,
         workflow_type: str,
+        workflow_run_id: str,
     ) -> None:
         """Process a single inbound message.
 
@@ -146,6 +147,7 @@ class MessageProcessor:
             tenant_id=tenant_id or "",
             workflow_id=workflow_id,
             workflow_type=workflow_type,
+            workflow_run_id=workflow_run_id,
             authorization=payload.authorization,
             thread_id=payload.thread_id or "",
             message_type=message_type,

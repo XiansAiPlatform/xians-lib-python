@@ -18,6 +18,7 @@ from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
 from ...agents.metrics import MetricsCollection
 from ...agents.metrics.usage_activities import UsageActivities
+from ...agents.workflow_logs import WorkflowLogService
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
 from ...middleware.v1 import initialize_middleware
@@ -559,7 +560,8 @@ class XiansPlatform:
             logger.warning("No Temporal connection. Skipping worker startup.")
             return
 
-        message_activities = MessageActivities(self._message_service)
+        workflow_logs_service = WorkflowLogService(self.xians_client)
+        message_activities = MessageActivities(self._message_service, workflow_logs_service)
         usage_activities = UsageActivities(self.xians_client)
 
         for agent_reg in self.agents.all():

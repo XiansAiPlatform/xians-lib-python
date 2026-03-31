@@ -104,6 +104,8 @@ class ProcessMessageActivityRequest:
     tenant_id: Optional[str] = ""
     workflow_id: Optional[str] = ""
     workflow_type: Optional[str] = ""
+    # Temporal workflow run id used for run-scoped log correlation in the UI.
+    workflow_run_id: Optional[str] = None
     authorization: Optional[str] = None
     thread_id: Optional[str] = ""
     metadata: Optional[dict[str, str]] = None

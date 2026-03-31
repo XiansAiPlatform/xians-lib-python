@@ -170,10 +170,12 @@ class BuiltinWorkflow:
                 message = self._message_queue.popleft()
                 try:
                     from .message_processor import MessageProcessor
+                    wf_run_id = wf_info.run_id
                     await MessageProcessor.process_message(
                         message=message,
                         workflow_id=workflow_id,
                         workflow_type=workflow_type,
+                        workflow_run_id=wf_run_id,
                     )
                 except Exception as e:
                     workflow.logger.error(f"Error processing message: {e}")
