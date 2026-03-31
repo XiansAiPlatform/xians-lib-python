@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 import traceback
+from datetime import datetime, timezone
 
 from .log_service import WorkflowLogService
 from .models import WorkflowLogLevelName, WorkflowLogRequest
@@ -74,6 +75,9 @@ class WorkflowLogEmitter:
         exception: str | None = None,
     ) -> None:
         """Enqueue a log record and flush if thresholds are met."""
+        if not self._log_service.is_enabled_for(level):
+            return
+
         trace_id, span_id = _current_trace_context()
         record = WorkflowLogRequest(
             message=message,
@@ -87,6 +91,7 @@ class WorkflowLogEmitter:
             tenant_id=self._tenant_id,
             trace_id=trace_id,
             span_id=span_id,
+            created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             exception=exception,
         )
         self._buffer.append(record)

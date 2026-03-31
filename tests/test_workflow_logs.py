@@ -51,7 +51,7 @@ async def test_workflow_log_service_falls_back_on_level_format() -> None:
             return
 
     dummy = DummyClient()
-    service = WorkflowLogService(dummy)  # type: ignore[arg-type]
+    service = WorkflowLogService(dummy, prefer_numeric_levels=False)  # type: ignore[arg-type]
 
     req = WorkflowLogRequest(
         message="x",
@@ -79,7 +79,7 @@ async def test_workflow_log_service_uses_sticky_numeric_after_fallback() -> None
                 raise XiansServerError("bad level format", status_code=400)
 
     dummy = DummyClient()
-    service = WorkflowLogService(dummy)  # type: ignore[arg-type]
+    service = WorkflowLogService(dummy, prefer_numeric_levels=False)  # type: ignore[arg-type]
 
     req = WorkflowLogRequest(
         message="x",
@@ -104,6 +104,9 @@ async def test_workflow_log_emitter_flushes_on_batch_size() -> None:
         def __init__(self) -> None:
             self.batches: list[list[WorkflowLogRequest]] = []
 
+        def is_enabled_for(self, _level: WorkflowLogLevelName) -> bool:
+            return True
+
         async def upload_batch_async(self, records: list[WorkflowLogRequest]) -> None:
             self.batches.append(records)
 
@@ -126,6 +129,7 @@ async def test_workflow_log_emitter_flushes_on_batch_size() -> None:
     await emitter.emit_info("two")
     assert len(service.batches) == 1
     assert len(service.batches[0]) == 2
+    assert service.batches[0][0].created_at is not None
 
 
 @pytest.mark.asyncio
@@ -133,6 +137,9 @@ async def test_workflow_log_emitter_flushes_on_time_interval() -> None:
     class DummyService:
         def __init__(self) -> None:
             self.batches: list[list[WorkflowLogRequest]] = []
+
+        def is_enabled_for(self, _level: WorkflowLogLevelName) -> bool:
+            return True
 
         async def upload_batch_async(self, records: list[WorkflowLogRequest]) -> None:
             self.batches.append(records)
@@ -162,6 +169,9 @@ async def test_workflow_log_emitter_emit_error_formats_exception() -> None:
         def __init__(self) -> None:
             self.batches: list[list[WorkflowLogRequest]] = []
 
+        def is_enabled_for(self, _level: WorkflowLogLevelName) -> bool:
+            return True
+
         async def upload_batch_async(self, records: list[WorkflowLogRequest]) -> None:
             self.batches.append(records)
 
@@ -187,4 +197,27 @@ async def test_workflow_log_emitter_emit_error_formats_exception() -> None:
     assert len(service.batches[0]) == 1
     assert service.batches[0][0].exception is not None
     assert "ValueError: boom" in service.batches[0][0].exception
+
+
+def test_workflow_log_service_level_gate_default_disabled() -> None:
+    class DummyClient:
+        async def upload_agent_logs(self, payload: list[dict]) -> None:
+            return
+
+    service = WorkflowLogService(DummyClient())  # type: ignore[arg-type]
+    assert service.is_enabled_for(WorkflowLogLevelName.Information) is False
+
+
+def test_workflow_log_service_level_gate_enabled_at_information() -> None:
+    class DummyClient:
+        async def upload_agent_logs(self, payload: list[dict]) -> None:
+            return
+
+    service = WorkflowLogService(
+        DummyClient(),  # type: ignore[arg-type]
+        min_server_log_level="Information",
+    )
+    assert service.is_enabled_for(WorkflowLogLevelName.Debug) is False
+    assert service.is_enabled_for(WorkflowLogLevelName.Information) is True
+    assert service.is_enabled_for(WorkflowLogLevelName.Error) is True
 

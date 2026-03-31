@@ -560,7 +560,10 @@ class XiansPlatform:
             logger.warning("No Temporal connection. Skipping worker startup.")
             return
 
-        workflow_logs_service = WorkflowLogService(self.xians_client)
+        workflow_logs_service = WorkflowLogService(
+            self.xians_client,
+            min_server_log_level=self.options.server_log_level,
+        )
         message_activities = MessageActivities(self._message_service, workflow_logs_service)
         usage_activities = UsageActivities(self.xians_client)
 
