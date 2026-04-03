@@ -121,6 +121,17 @@ class _XiansContextMeta(type):
         """
         return cls.CurrentAgent.metrics
 
+    @property
+    def Messaging(cls):
+        """Access proactive messaging helper. Matches C# XiansContext.Messaging.
+
+        Use from workflows/activities:
+            await XiansContext.Messaging.send_chat_async("Hello!")
+            await XiansContext.Messaging.send_data_async("Update", {"status": "done"})
+        """
+        from ..messaging.messaging_helper import MessagingHelper
+        return MessagingHelper
+
 
 class XiansContext(metaclass=_XiansContextMeta):
     """Central context hub for accessing all Xians SDK functionality.

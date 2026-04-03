@@ -2,7 +2,10 @@
 
 from ...agents.core.xians_context import XiansContext
 from ...agents.messaging.message_service import MessageService
+from ...agents.messaging.message_type import MessageType
+from ...agents.messaging.messaging_helper import MessagingHelper
 from ...agents.messaging.user_message_context import UserMessageContext
+from ...agents.messaging.user_messaging import UserMessaging
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
 from ...configs.v1 import LLMConfig, TemporalConfig, XiansOptions, XiansServerConfig
 from ...constants.v1 import WorkflowType
@@ -44,9 +47,12 @@ __all__ = [
     "XiansWorkflow",
     "AgentRegistration",
     "UserMessageContext",
+    "UserMessaging",
     "WebhookContext",
     "WebhookMessage",
     "MessageService",
+    "MessageType",
+    "MessagingHelper",
     "XiansContext",
     "TenantContext",
 ]

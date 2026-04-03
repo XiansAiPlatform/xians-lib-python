@@ -1,5 +1,7 @@
 """Unit tests for workflow log ingestion payloads."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from xians.agents.workflow_logs.log_emitter import WorkflowLogEmitter
@@ -10,6 +12,60 @@ from xians.agents.workflow_logs.models import (
     WorkflowLogRequest,
 )
 from xians.exceptions.v1.errors import XiansServerError
+
+
+def test_temporal_workflow_id_for_logging_prefers_activity_info() -> None:
+    from xians.temporal_workflows.v1.message_activities import (
+        _temporal_workflow_id_for_logging,
+    )
+
+    info = MagicMock(workflow_id="tenant:Agent:Flow:activation-1")
+    with patch(
+        "xians.temporal_workflows.v1.message_activities.activity.info",
+        return_value=info,
+    ):
+        assert _temporal_workflow_id_for_logging("tenant:Agent:Flow") == "tenant:Agent:Flow:activation-1"
+
+
+def test_temporal_workflow_id_for_logging_falls_back_when_no_activity() -> None:
+    from xians.temporal_workflows.v1.message_activities import (
+        _temporal_workflow_id_for_logging,
+    )
+
+    with patch(
+        "xians.temporal_workflows.v1.message_activities.activity.info",
+        side_effect=RuntimeError("not in activity"),
+    ):
+        assert _temporal_workflow_id_for_logging("tenant:Agent:Flow") == "tenant:Agent:Flow"
+
+
+def test_temporal_workflow_id_for_logging_falls_back_when_activity_id_empty() -> None:
+    from xians.temporal_workflows.v1.message_activities import (
+        _temporal_workflow_id_for_logging,
+    )
+
+    info = MagicMock(workflow_id="")
+    with patch(
+        "xians.temporal_workflows.v1.message_activities.activity.info",
+        return_value=info,
+    ):
+        assert _temporal_workflow_id_for_logging("tenant:Agent:Flow") == "tenant:Agent:Flow"
+
+
+def test_temporal_workflow_run_id_for_logging_prefers_activity_info() -> None:
+    from xians.temporal_workflows.v1.message_activities import (
+        _temporal_workflow_run_id_for_logging,
+    )
+
+    info = MagicMock(workflow_run_id="01HZ-run-from-temporal")
+    with patch(
+        "xians.temporal_workflows.v1.message_activities.activity.info",
+        return_value=info,
+    ):
+        assert (
+            _temporal_workflow_run_id_for_logging("from-request")
+            == "01HZ-run-from-temporal"
+        )
 
 
 def test_workflow_log_request_serialization_name_and_number() -> None:

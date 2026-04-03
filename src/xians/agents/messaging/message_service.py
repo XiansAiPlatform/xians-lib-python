@@ -11,11 +11,13 @@ from ...temporal_workflows.v1.models import (
     SendHandoffRequest,
     DbMessage,
 )
+from .message_type import MessageType
 
 logger = logging.getLogger(__name__)
 
 RATE_LIMIT_MAX_RETRIES = 3
 RATE_LIMIT_DEFAULT_WAIT = 60
+RATE_LIMIT_MAX_WAIT = 120
 
 
 class MessageService:
@@ -31,9 +33,16 @@ class MessageService:
         """Send an outbound message.
         POST /api/agent/conversation/outbound/{type}
 
-        Retries on 429 (rate limit).
+        Validates the message type and retries on 429 (rate limit).
         """
         msg_type = (request.type or "chat").lower()
+
+        if not MessageType.is_valid(msg_type):
+            allowed = ", ".join(MessageType.get_allowed_types())
+            raise ValueError(
+                f"Invalid message type: '{msg_type}'. Allowed types: {allowed}"
+            )
+
         endpoint = f"/api/agent/conversation/outbound/{msg_type}"
 
         payload: dict[str, Any] = {
@@ -55,37 +64,25 @@ class MessageService:
         if request.tenant_id:
             headers["X-Tenant-Id"] = request.tenant_id
 
-        # Debug: log request/response for outbound chat to troubleshoot Unknown Participant
-        logger.info(
-            "[DEBUG] Outbound message request body endpoint=%s participantId=%r workflowId=%s type=%s payload=%s",
+        logger.debug(
+            "Outbound message: endpoint=%s participantId=%s workflowId=%s type=%s",
             endpoint,
             request.participant_id,
             request.workflow_id,
             request.type,
-            payload,
         )
-        logger.debug("[DEBUG] Full outbound payload: %s", payload)
 
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             response = await self._client.post(endpoint, json=payload, headers=headers)
 
-            # Debug: log response for outbound request (in message so it appears with default formatters)
-            try:
-                response_body = response.text
-                if response.headers.get("content-type", "").startswith("application/json") and response_body:
-                    response_body = response.json()
-            except Exception:
-                response_body = response.text
-            logger.info(
-                "[DEBUG] Outbound message response endpoint=%s status_code=%s participantId=%r response_body=%s",
+            logger.debug(
+                "Outbound response: endpoint=%s status=%s",
                 endpoint,
                 response.status_code,
-                request.participant_id,
-                response_body,
             )
 
             if response.status_code == 429:
-                retry_after = self._get_retry_after(response)
+                retry_after = min(self._get_retry_after(response), RATE_LIMIT_MAX_WAIT)
                 logger.warning(
                     f"Rate limited. Retrying after {retry_after}s (attempt {attempt + 1})"
                 )

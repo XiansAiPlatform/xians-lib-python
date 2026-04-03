@@ -184,8 +184,8 @@ class WebSearchSubAgent:
     async def run_async(self, context) -> str:
         """Run the agent on a user message from the Xians workflow context.
 
-        Loads system instructions from Knowledge on each invocation
-        (cached after first load). Falls back to a default prompt.
+        Streams reasoning and tool execution progress messages to the user
+        while the agent works, then returns the final answer.
 
         Args:
             context: UserMessageContext from the Xians BuiltinWorkflow handler.
@@ -203,14 +203,33 @@ class WebSearchSubAgent:
         logger.info(f"Processing search query: {user_text[:80]}...")
 
         try:
+            # Stream reasoning progress to user (Message Progress feature)
+            await context.send_reasoning_async(
+                f"Analyzing query: {user_text[:60]}..."
+            )
+
             system_instructions = await self._get_system_instructions()
             agent = await self._get_or_create_agent(system_instructions)
+
+            await context.send_reasoning_async(
+                "Determining search strategy and selecting tools..."
+            )
 
             result = await agent.ainvoke(
                 {"messages": [("user", user_text)]}
             )
 
             messages = result.get("messages", [])
+
+            # Stream tool execution progress for any tool calls in the message history
+            for msg in messages:
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tool_name = tc.get("name", "unknown") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                        await context.send_tool_exec_async(
+                            f"{tool_name}(...)"
+                        )
+
             if messages:
                 last_message = messages[-1]
                 response_text = (
@@ -219,8 +238,11 @@ class WebSearchSubAgent:
                     else str(last_message)
                 )
 
-                # Report LLM token usage metrics (matches C# metrics pattern)
                 await _report_llm_metrics(context, last_message)
+
+                await context.send_reasoning_async(
+                    "Synthesizing search results into a response..."
+                )
 
                 return response_text
 
