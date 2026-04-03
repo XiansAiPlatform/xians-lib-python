@@ -126,7 +126,7 @@ async def my_chat_handler(context: UserMessageContext) -> None:
 | `hint` | `str` | Optional hint for message handling |
 | `tenant_id` | `str` | Tenant identifier (for multi-tenant applications) |
 | `authorization` | `str` | Authorization token if provided |
-| `message_type` | `str` | The type of message (chat, data, file) |
+| `message_type` | `str` | The type of message (chat, data, file, webhook, heartbeat) |
 
 ## Message Types
 
@@ -139,6 +139,18 @@ When responding to users, there are several distinct message types:
 | **Reasoning** | Streaming agent thinking steps | `send_reasoning_async()` | Show intermediate reasoning/planning steps |
 | **Tool** | Streaming tool execution steps | `send_tool_exec_async()` | Show which tools are being invoked |
 | **Handoff** | Transfer user to a different workflow | `send_handoff_async()` | Routing to specialized agents |
+| **Heartbeat** | Frontend liveness check | *(handled automatically)* | Verifying an agent worker is available |
+
+### Heartbeat Messages
+
+Heartbeat is a special message type used by the frontend (or platform) to verify an agent worker is running and reachable. **No user handler is invoked.** When a heartbeat arrives:
+
+1. The workflow extracts the tenant ID from the workflow ID.
+2. On success it responds immediately with a **Data** message: `{ "available": true }` with `origin: "heartbeat"`.
+3. If tenant extraction fails but a fallback tenant can be derived (first segment of `workflowId`), a **Data** message with `{ "available": false, "reason": "configuration_error" }` is sent so the UI can distinguish a misconfiguration from a genuine worker timeout.
+4. If no fallback tenant can be determined, no response is sent at all (the UI treats silence as "worker unreachable").
+
+Developers do **not** need to register a handler for heartbeat—it is processed entirely by the SDK's `MessageProcessor`.
 
 ## Responding to Users
 

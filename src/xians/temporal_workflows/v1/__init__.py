@@ -10,7 +10,7 @@ from .models import (
     WebhookResponse,
     DbMessage,
 )
-from .tenant_context import TenantContext
+from .tenant_context import TenantContext, WorkflowIdError
 from .worker_runner import WorkerHost, WorkerRegistry, WorkerRegistration, build_task_queue_name
 from .workflows import BuiltinWorkflow
 
@@ -21,6 +21,7 @@ __all__ = [
     "WorkerRegistration",
     "build_task_queue_name",
     "TenantContext",
+    "WorkflowIdError",
     "InboundMessage",
     "InboundMessagePayload",
     "WorkflowHandlerMetadata",

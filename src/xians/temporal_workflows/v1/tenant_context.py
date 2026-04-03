@@ -3,15 +3,50 @@
 from typing import Optional
 
 
+class WorkflowIdError(Exception):
+    """Raised when a workflow ID is invalid (null/empty or wrong format).
+
+    Mirrors C# WorkflowException thrown by TenantContext.ValidateAndSplitWorkflowId.
+    """
+
+    def __init__(self, message: str, workflow_id: Optional[str] = None) -> None:
+        self.workflow_id = workflow_id
+        super().__init__(message)
+
+
 class TenantContext:
     """Utility for tenant context operations. Matches C# TenantContext."""
 
     @staticmethod
-    def extract_tenant_id(workflow_id: str) -> Optional[str]:
-        """Extract tenant ID from workflow ID (first segment before ':')."""
-        if ":" in workflow_id:
-            return workflow_id.split(":")[0]
-        return None
+    def _validate_and_split(
+        workflow_id: Optional[str],
+        min_parts: int,
+        expected_format: str,
+    ) -> list[str]:
+        """Validate and split a workflow ID. Matches C# ValidateAndSplitWorkflowId."""
+        if not workflow_id or not workflow_id.strip():
+            raise WorkflowIdError(
+                "WorkflowId cannot be null or empty.", workflow_id
+            )
+        parts = workflow_id.split(":")
+        if len(parts) < min_parts:
+            raise WorkflowIdError(
+                f"Invalid WorkflowId format. Expected '{expected_format}', got '{workflow_id}'",
+                workflow_id,
+            )
+        return parts
+
+    @staticmethod
+    def extract_tenant_id(workflow_id: str) -> str:
+        """Extract tenant ID from workflow ID (first segment before ':').
+
+        Raises ``WorkflowIdError`` if the workflow ID is empty or has fewer
+        than 2 colon-separated segments, matching C# TenantContext.ExtractTenantId.
+        """
+        parts = TenantContext._validate_and_split(
+            workflow_id, 2, "TenantId:WorkflowType:..."
+        )
+        return parts[0]
 
     @staticmethod
     def extract_workflow_type(workflow_id: str) -> Optional[str]:
