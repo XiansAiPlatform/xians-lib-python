@@ -47,6 +47,25 @@ class MessageProcessor:
         payload = message.payload
         message_type = (payload.type or "").lower()
 
+        # Heartbeat: respond immediately without invoking any handler
+        if message_type == "heartbeat":
+            tenant_id = TenantContext.extract_tenant_id(workflow_id)
+            if tenant_id is None:
+                logger.error("Failed to extract tenant ID for heartbeat, workflow_id=%s", workflow_id)
+                await MessageResponseHelper.send_heartbeat_unavailable_response(
+                    message=message,
+                    workflow_id=workflow_id,
+                    workflow_type=workflow_type,
+                    reason="Failed to extract tenant context",
+                )
+                return
+            await MessageResponseHelper.send_heartbeat_response(
+                message=message,
+                workflow_id=workflow_id,
+                workflow_type=workflow_type,
+            )
+            return
+
         if message_type not in ("chat", "data", "file", "webhook"):
             logger.warning(f"Skipping unknown message type: {message_type}")
             return
@@ -122,19 +141,12 @@ class MessageProcessor:
             )
             return
 
-        # Debug: log payload and participant_id to troubleshoot participant routing
-        logger.info(
-            "[DEBUG] MessageProcessor building ProcessMessageActivityRequest",
-            extra={
-                "message_type": message_type,
-                "participant_id": payload.participant_id,
-                "participantId_raw": getattr(payload, "participantId", ""),
-                "request_id": payload.request_id,
-                "workflow_id": workflow_id,
-                "workflow_type": workflow_type,
-            },
+        logger.debug(
+            "Routing %s message: participant=%s workflow=%s",
+            message_type,
+            payload.participant_id,
+            workflow_id,
         )
-        logger.debug("[DEBUG] Full inbound payload: %s", payload.__dict__ if hasattr(payload, "__dict__") else str(payload))
 
         request = ProcessMessageActivityRequest(
             message_text=payload.text or "",

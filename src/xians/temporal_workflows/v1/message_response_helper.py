@@ -1,4 +1,4 @@
-"""Helper for sending message responses from workflows."""
+"""Helper for sending message responses from workflows. Matches C# MessageResponseHelper."""
 
 import logging
 from datetime import timedelta
@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class MessageResponseHelper:
-    """Utility for sending responses back to users from within workflows."""
+    """Utility for sending responses back to users from within workflows.
+    Matches C# MessageResponseHelper.
+    """
 
     @staticmethod
     async def send_simple_message(
@@ -24,19 +26,8 @@ class MessageResponseHelper:
         """Send a simple text message back via activity."""
         tenant_id = TenantContext.extract_tenant_id(workflow_id) or ""
 
-        participant_id = message.payload.participantId
-        logger.info(
-            "[DEBUG] MessageResponseHelper.send_simple_message building SendMessageRequest",
-            extra={
-                "participant_id": participant_id,
-                "workflow_id": workflow_id,
-                "workflow_type": workflow_type,
-                "request_id": message.payload.requestId,
-            },
-        )
-
         request = SendMessageRequest(
-            participant_id=participant_id or "",
+            participant_id=message.payload.participantId or "",
             workflow_id=workflow_id,
             workflow_type=workflow_type,
             request_id=message.payload.requestId or "",
@@ -46,6 +37,73 @@ class MessageResponseHelper:
             thread_id=message.payload.threadId or "",
             hint=message.payload.hint or "",
             type="chat",
+            tenant_id=tenant_id,
+        )
+
+        await workflow.execute_activity(
+            "SendMessage",
+            request,
+            start_to_close_timeout=timedelta(minutes=1),
+        )
+
+    @staticmethod
+    async def send_heartbeat_response(
+        message: InboundMessage,
+        workflow_id: str,
+        workflow_type: str,
+    ) -> None:
+        """Send a heartbeat response indicating the agent worker is available.
+        Matches C# MessageResponseHelper.SendHeartbeatResponseAsync.
+        """
+        tenant_id = TenantContext.extract_tenant_id(workflow_id) or ""
+
+        request = SendMessageRequest(
+            participant_id=message.payload.participantId or "",
+            workflow_id=workflow_id,
+            workflow_type=workflow_type,
+            request_id=message.payload.requestId or "",
+            scope=message.payload.scope or "",
+            authorization=message.payload.authorization,
+            text="",
+            thread_id=message.payload.threadId or "",
+            hint=message.payload.hint or "",
+            data={"available": True},
+            origin="heartbeat",
+            type="data",
+            tenant_id=tenant_id,
+        )
+
+        await workflow.execute_activity(
+            "SendMessage",
+            request,
+            start_to_close_timeout=timedelta(minutes=1),
+        )
+
+    @staticmethod
+    async def send_heartbeat_unavailable_response(
+        message: InboundMessage,
+        workflow_id: str,
+        workflow_type: str,
+        reason: str = "Agent worker not available",
+    ) -> None:
+        """Send a heartbeat response indicating the agent worker is unavailable.
+        Matches C# MessageResponseHelper.SendHeartbeatUnavailableResponseAsync.
+        """
+        tenant_id = TenantContext.extract_tenant_id(workflow_id) or ""
+
+        request = SendMessageRequest(
+            participant_id=message.payload.participantId or "",
+            workflow_id=workflow_id,
+            workflow_type=workflow_type,
+            request_id=message.payload.requestId or "",
+            scope=message.payload.scope or "",
+            authorization=message.payload.authorization,
+            text="",
+            thread_id=message.payload.threadId or "",
+            hint=message.payload.hint or "",
+            data={"available": False, "reason": reason},
+            origin="heartbeat",
+            type="data",
             tenant_id=tenant_id,
         )
 

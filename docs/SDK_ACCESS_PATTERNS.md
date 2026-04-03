@@ -11,7 +11,7 @@ This document describes the **four SDK access patterns** from the Xians SDK desi
 | **UserMessageContext** | Message-specific operations | Message handlers only | ✅ Implemented |
 | **CurrentAgent** | Agent-level data (knowledge, documents) | All workflows | ⚠️ Partial |
 | **CurrentWorkflow** | Workflow-level operations (schedules, identity) | All workflows | ⚠️ Partial |
-| **XiansContext** | Cross-cutting (messaging, A2A, sub-workflows, registry) | All workflows | ⚠️ Partial |
+| **XiansContext** | Cross-cutting (messaging, A2A, sub-workflows, registry) | All workflows | ✅ Messaging, ⚠️ A2A/Workflows |
 
 ---
 
@@ -169,7 +169,7 @@ async def in_handler_or_activity() -> None:
 | GetWorkflow | `XiansContext.GetWorkflow(workflowType)` | `XiansContext.get_workflow(workflow_type)` | ✅ |
 | GetAllAgents | `XiansContext.GetAllAgents()` | `XiansContext.get_all_agents()` | ✅ |
 | GetAllWorkflows | `XiansContext.GetAllWorkflows()` | `XiansContext.get_all_workflows()` | ✅ |
-| Proactive messaging | `await XiansContext.Messaging.SendChatAsync(participantId, text)` | No XiansContext.Messaging facade | ❌ Gap |
+| Proactive messaging | `await XiansContext.Messaging.SendChatAsync(participantId, text)` | `await XiansContext.Messaging.send_chat_async(text, participant_id=pid)` | ✅ |
 | A2A | `await XiansContext.A2A.SendChatAsync(targetWorkflow, message)` | No XiansContext.A2A | ❌ Gap |
 | Start sub-workflow | `await XiansContext.Workflows.StartAsync<T>(...)` | Use `AgentClient` from platform (e.g. `platform.client().invoke(...)`) with workflow_id/task_queue | ⚠️ Different |
 
@@ -197,7 +197,32 @@ wf_type = XiansContext.build_workflow_type("MyAgent", "Conversational")
 wf_id = XiansContext.build_workflow_id(tenant_id, "MyAgent", "Conversational", id_postfix="conv-1")
 ```
 
-**Proactive messaging (not yet on XiansContext):** In C# you call `XiansContext.Messaging.SendChatAsync(participantId, "Your order shipped!")`. In Python there is no central `XiansContext.Messaging`; messaging is done via `UserMessageContext` (reply in a handler) or via the low-level `MessageService` used inside the SDK. To send proactive messages from a custom workflow you would need access to a `MessageService` and to build a `SendMessageRequest` with workflow/participant/tenant from context. A future facade would align this with C#.
+**Proactive messaging (implemented):** Python now has full `XiansContext.Messaging` parity with C#:
+
+```python
+from xians.agents.core import XiansContext
+
+# Send proactive messages from any workflow or activity
+await XiansContext.Messaging.send_chat_async(
+    text="Your order has shipped!",
+    participant_id="user-123",
+)
+
+await XiansContext.Messaging.send_data_async(
+    text="Order update",
+    data={"status": "shipped"},
+    participant_id="user-123",
+)
+
+# Send as a different workflow (e.g., from a background worker)
+await XiansContext.Messaging.send_chat_as_workflow_async(
+    builtin_workflow_name="Conversational",
+    text="Content discovered!",
+    participant_id="user-123",
+)
+```
+
+For low-level control, use `UserMessaging` directly. See [Proactive Messaging](./MESSAGING_PROACTIVE.md) for full documentation.
 
 **A2A (not yet on XiansContext):** In C# you use `XiansContext.A2A.SendChatAsync(targetWorkflow, new A2AMessage { Text = "..." })`. In Python there is no A2A facade. You would need to start or signal the target workflow (e.g. via `AgentClient`) and pass the message as input/signal. A future A2A helper would match C#.
 
@@ -227,7 +252,7 @@ There is no `XiansContext.Workflows.StartAsync`-style API; you use `AgentClient`
 | **UserMessageContext** | Full | Full | Aligned. |
 | **CurrentAgent** | Name + Knowledge | Name, Knowledge, Documents, Schedules, Tasks | Knowledge aligned. Python: add Documents, Schedules (and optionally Tasks) on agent. |
 | **CurrentWorkflow** | workflow_type, registration | WorkflowType, WorkflowId, TaskQueue, (Schedules on Agent in C#) | Python: WorkflowId via context; TaskQueue via helper; no Schedules. |
-| **XiansContext** | Context + registry + ID helpers | + Messaging, A2A, Workflows | Python: no Messaging/A2A/Workflows facades; use MessageService and AgentClient where needed. |
+| **XiansContext** | Context + registry + ID helpers + Messaging | + A2A, Workflows | Python: Messaging fully implemented via `XiansContext.Messaging`; no A2A/Workflows facades; use AgentClient where needed. |
 
 ---
 
@@ -240,11 +265,15 @@ There is no `XiansContext.Workflows.StartAsync`-style API; you use `AgentClient`
 - **Workflow** owns workflow identity (and in the doc, schedules — in C# schedules are on the agent).
 - **XiansContext** orchestrates messaging, A2A, sub-workflows, and registry.
 
-The Python SDK follows the same ownership model where the APIs exist; the gaps are the missing facades (Knowledge, Documents, Schedules, Messaging, A2A, Workflows) rather than a different design.
+The Python SDK follows the same ownership model where the APIs exist; the remaining gaps are Documents, Schedules, A2A, and Workflows facades (Knowledge and Messaging are fully implemented).
 
 ---
 
 ## See also
 
 - [XIANSCONTEXT_CURRENT_AGENT_WORKFLOW.md](XIANSCONTEXT_CURRENT_AGENT_WORKFLOW.md) — How `CurrentAgent` and `CurrentWorkflow` resolve and how to use them in handlers and custom workflows.
+- [Replying to User Messages](./MESSAGING_REPLYING.md) — Reply to incoming messages with `UserMessageContext`.
+- [Proactive Messaging](./MESSAGING_PROACTIVE.md) — Send messages proactively via `XiansContext.Messaging`.
+- [Message Progress](./MESSAGING_PROGRESS.md) — Reasoning and tool execution messages.
+- [File Upload Messaging](./MESSAGING_FILEUPLOAD.md) — Handle file uploads.
 - [SDK Access Patterns](https://docs.xians.ai/concepts/sdk-patterns) (XiansAi.Docs) — Canonical pattern list and C# examples.

@@ -164,11 +164,31 @@ class CurrentMessage:
 
 @dataclass
 class WebhookResponse:
-    """Response from webhook handler."""
+    """Response from webhook handler. Matches C# WebhookResponse with factory methods."""
     status_code: int = 200
     content: str = ""
     content_type: str = "application/json"
     headers: Optional[dict[str, str]] = None
+
+    @staticmethod
+    def ok(content: str = "", content_type: str = "application/json") -> "WebhookResponse":
+        return WebhookResponse(status_code=200, content=content, content_type=content_type)
+
+    @staticmethod
+    def error(content: str = "Internal Server Error", status_code: int = 500) -> "WebhookResponse":
+        return WebhookResponse(status_code=status_code, content=content, content_type="text/plain")
+
+    @staticmethod
+    def bad_request(content: str = "Bad Request") -> "WebhookResponse":
+        return WebhookResponse(status_code=400, content=content, content_type="text/plain")
+
+    @staticmethod
+    def not_found(content: str = "Not Found") -> "WebhookResponse":
+        return WebhookResponse(status_code=404, content=content, content_type="text/plain")
+
+    @staticmethod
+    def internal_server_error(content: str = "Internal Server Error") -> "WebhookResponse":
+        return WebhookResponse(status_code=500, content=content, content_type="text/plain")
 
 
 @dataclass
