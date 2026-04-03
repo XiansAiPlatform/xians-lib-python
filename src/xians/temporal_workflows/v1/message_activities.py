@@ -14,42 +14,17 @@ from .models import (
     DbMessage,
     WebhookResponse,
 )
+from .message_activity_workflow_logging import (
+    setup_message_activity_context,
+    teardown_message_activity_context,
+    try_create_workflow_log_emitter,
+)
 from ...agents.messaging.user_message_context import UserMessageContext
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
 from ...agents.messaging.message_service import MessageService
-from ...agents.core.xians_context import XiansContext
 from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService
 
 logger = logging.getLogger(__name__)
-
-
-def _temporal_workflow_id_for_logging(fallback: str | None) -> str:
-    """Temporal instance id for POST /api/agent/logs ``workflowId`` (parity with .NET).
-
-    The activity request may carry a logical/thread id ({tenant}:{workflowType}) from
-    the signal payload; Temporal's execution id includes activation postfix when the
-    server started the workflow that way. Auditing distinct-workflow lists key off the
-    stored ``workflowId`` string, so logs must use the canonical Temporal id.
-    """
-    try:
-        wid = (activity.info().workflow_id or "").strip()
-    except Exception:
-        wid = ""
-    if wid:
-        return wid
-    return (fallback or "").strip()
-
-
-def _temporal_workflow_run_id_for_logging(fallback: str | None) -> str | None:
-    """Temporal run id for run-scoped Auditing / ``workflowRunId`` on ingest."""
-    try:
-        rid = (activity.info().workflow_run_id or "").strip()
-    except Exception:
-        rid = ""
-    if rid:
-        return rid
-    fb = (fallback or "").strip()
-    return fb or None
 
 
 class MessageActivities:
@@ -82,54 +57,15 @@ class MessageActivities:
             message_type,
         )
 
-        log_workflow_id = _temporal_workflow_id_for_logging(request.workflow_id)
-        workflow_run_id = _temporal_workflow_run_id_for_logging(request.workflow_run_id)
-
-        # Populate XiansContext with workflow and agent identity so that
-        # XiansContext.CurrentAgent / CurrentWorkflow resolve inside handlers.
-        # Use canonical Temporal workflow id so idPostfix / activation parses match ingest.
-        XiansContext.set_workflow_id(log_workflow_id)
-        XiansContext.set_workflow_type(request.workflow_type)
-        if request.workflow_type:
-            agent_name = request.workflow_type.split(":", 1)[0]
-        else:
-            agent_name = None
-        XiansContext.set_agent_name(agent_name)
-
-        XiansContext.set_tenant_id(request.tenant_id)
-        XiansContext.set_participant_id(request.participant_id)
-        XiansContext.set_authorization(request.authorization)
-        XiansContext.set_request_id(request.request_id)
-
-        log_agent = (metadata.agent_name or "").strip() or agent_name
-        log_participant = (request.participant_id or "").strip() or None
-
-        # One emitter per activity execution; buffer is per-emitter.
-        emitter: WorkflowLogEmitter | None = None
-        try:
-            if (
-                self._workflow_logs_service
-                and log_workflow_id
-                and request.workflow_type
-                and log_agent
-            ):
-                if not workflow_run_id:
-                    logger.debug(
-                        "WorkflowLogEmitter: workflow_run_id missing after Temporal lookup; "
-                        "emitting without workflowRunId"
-                    )
-                emitter = WorkflowLogEmitter(
-                    log_service=self._workflow_logs_service,
-                    agent=log_agent,
-                    workflow_type=request.workflow_type,
-                    workflow_id=log_workflow_id,
-                    workflow_run_id=workflow_run_id,
-                    activation=XiansContext.safe_id_postfix(),
-                    participant_id=log_participant,
-                    tenant_id=request.tenant_id or XiansContext.safe_tenant_id(),
-                )
-        except Exception:
-            logger.warning("Failed to initialize WorkflowLogEmitter", exc_info=True)
+        log_wid, run_id, log_agent, log_participant = setup_message_activity_context(request, metadata)
+        emitter = try_create_workflow_log_emitter(
+            self._workflow_logs_service,
+            request,
+            log_workflow_id=log_wid,
+            workflow_run_id=run_id,
+            log_agent=log_agent,
+            log_participant=log_participant,
+        )
 
         try:
             if emitter:
@@ -166,13 +102,7 @@ class MessageActivities:
         finally:
             if emitter:
                 await emitter.flush()
-            XiansContext.set_workflow_id(None)
-            XiansContext.set_workflow_type(None)
-            XiansContext.set_agent_name(None)
-            XiansContext.set_tenant_id(None)
-            XiansContext.set_participant_id(None)
-            XiansContext.set_authorization(None)
-            XiansContext.set_request_id(None)
+            teardown_message_activity_context()
 
     @activity.defn(name="SendMessage")
     async def send_message(self, request: SendMessageRequest) -> None:
@@ -232,12 +162,15 @@ class MessageActivities:
         self,
         request: ProcessMessageActivityRequest,
         metadata: WorkflowHandlerMetadata,
-        emitter: WorkflowLogEmitter | None,
+        emitter: WorkflowLogEmitter | None = None,
     ) -> None:
         """Process a webhook message. Matches C# MessageActivities.ProcessWebhookAsync.
 
         On handler exception, sets InternalServerError response (still sends the
         webhook response back to the server).
+
+        ``emitter`` is optional (``None`` when workflow server logging is disabled);
+        upstream-only call shape is preserved via the default.
         """
         payload_data = request.data
         if isinstance(payload_data, dict):

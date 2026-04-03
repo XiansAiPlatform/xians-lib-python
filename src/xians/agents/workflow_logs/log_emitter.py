@@ -1,10 +1,15 @@
-"""Workflow log emitter adapter.
+"""Workflow log emitter — per-activity convenience wrapper.
 
-Responsibilities:
-- Normalize record shape to `WorkflowLogRequest`
-- Map internal log calls to backend log level semantics
-- Buffer and flush logs in batches
-- Flush on activity completion (best-effort)
+The emitter batches log records within a single activity execution and flushes
+them either when the batch-size threshold is reached, the time interval expires,
+or ``flush()`` is called explicitly (typically in a ``finally`` block).
+
+Records are uploaded via the injected ``WorkflowLogService`` **and** enqueued
+to the global ``LoggingServices`` queue (when initialised) so the background
+processor can capture any stragglers.
+
+Mirrors the per-instance buffering in the previous Python implementation while
+integrating with the new ``LoggingServices`` global pipeline from C#.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import traceback
 from datetime import datetime, timezone
 
 from .log_service import WorkflowLogService
+from .logging_services import LoggingServices
 from .models import WorkflowLogLevelName, WorkflowLogRequest
 
 logger = logging.getLogger(__name__)
@@ -35,6 +41,12 @@ def _current_trace_context() -> tuple[str | None, str | None]:
 
 
 class WorkflowLogEmitter:
+    """Per-activity log emitter with local buffering and batch upload.
+
+    Each ``MessageActivities.process_and_send_message`` invocation creates its
+    own emitter so buffers are isolated across concurrent activities.
+    """
+
     def __init__(
         self,
         *,
@@ -96,15 +108,24 @@ class WorkflowLogEmitter:
         )
         self._buffer.append(record)
 
-        # Flush early for large bursts; periodic flush to match platform behavior.
         if len(self._buffer) >= self._batch_size or self._should_flush_by_time():
             await self.flush()
+
+    # ------------------------------------------------------------------
+    # Convenience methods (mirrors C# IXiansLogger level helpers)
+    # ------------------------------------------------------------------
+
+    async def emit_trace(self, message: str) -> None:
+        await self.emit(level=WorkflowLogLevelName.Trace, message=message)
+
+    async def emit_debug(self, message: str) -> None:
+        await self.emit(level=WorkflowLogLevelName.Debug, message=message)
 
     async def emit_info(self, message: str) -> None:
         await self.emit(level=WorkflowLogLevelName.Information, message=message)
 
-    async def emit_debug(self, message: str) -> None:
-        await self.emit(level=WorkflowLogLevelName.Debug, message=message)
+    async def emit_warning(self, message: str) -> None:
+        await self.emit(level=WorkflowLogLevelName.Warning, message=message)
 
     async def emit_error(self, message: str, exc: BaseException | str | None = None) -> None:
         exception_text: str | None = None
@@ -117,8 +138,21 @@ class WorkflowLogEmitter:
 
         await self.emit(level=WorkflowLogLevelName.Error, message=message, exception=exception_text)
 
+    async def emit_critical(self, message: str, exc: BaseException | str | None = None) -> None:
+        exception_text: str | None = None
+        if exc is None:
+            exception_text = None
+        elif isinstance(exc, str):
+            exception_text = exc
+        else:
+            exception_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+        await self.emit(level=WorkflowLogLevelName.Critical, message=message, exception=exception_text)
+
     async def flush(self) -> None:
-        """Flush buffered logs to the backend (best-effort)."""
+        """Flush buffered logs: direct upload via ``WorkflowLogService`` *and*
+        enqueue to global ``LoggingServices`` for any that fail to upload directly.
+        """
         if not self._buffer:
             return
 
@@ -129,9 +163,10 @@ class WorkflowLogEmitter:
         try:
             await self._log_service.upload_batch_async(to_upload)
         except Exception:
-            # Best-effort: never fail user handler due to logging.
-            logger.warning("WorkflowLogEmitter flush failed", exc_info=True)
+            logger.warning("WorkflowLogEmitter flush failed — routing to global queue", exc_info=True)
+            if LoggingServices.is_initialized():
+                for record in to_upload:
+                    LoggingServices.enqueue_log(record)
 
 
 __all__ = ["WorkflowLogEmitter"]
-

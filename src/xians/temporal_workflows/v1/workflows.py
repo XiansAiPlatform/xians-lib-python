@@ -94,6 +94,23 @@ class BuiltinWorkflow:
         Accepts *args because the Xians server may pass workflow parameters
         via StartWorkflowAsync (matching C# where RunAsync() ignores them).
         """
+        wi = workflow.info()
+        memo = {}
+        try:
+            memo = workflow.memo() or {}
+        except Exception:
+            pass
+
+        id_postfix = memo.get("idPostfix") or memo.get("IdPostfix") or ""
+        workflow.logger.info(
+            "Workflow started: id=%s type=%s queue=%s runId=%s idPostfix=%r memo_keys=%s",
+            wi.workflow_id,
+            wi.workflow_type,
+            wi.task_queue,
+            wi.run_id,
+            id_postfix or None,
+            list(memo.keys()) if memo else "[]",
+        )
         await self._process_messages_loop()
 
     @workflow.signal(name="HandleInboundChatOrData")
@@ -141,9 +158,7 @@ class BuiltinWorkflow:
         2. Dequeue and process via MessageProcessor
         3. Check for continue-as-new
         """
-        wf_info = workflow.info()
-        workflow_type = wf_info.workflow_type
-        workflow_id = wf_info.workflow_id
+        workflow_type = workflow.info().workflow_type
         options = _workflow_options.get(workflow_type, WorkflowOptions())
         inactivity_timeout = options.inactivity_timeout
 
@@ -170,22 +185,24 @@ class BuiltinWorkflow:
                 message = self._message_queue.popleft()
                 try:
                     from .message_processor import MessageProcessor
-                    wf_run_id = wf_info.run_id
+                    # Fresh info per message so workflow_run_id stays correct after continue-as-new.
+                    wi = workflow.info()
                     await MessageProcessor.process_message(
                         message=message,
-                        workflow_id=workflow_id,
-                        workflow_type=workflow_type,
-                        workflow_run_id=wf_run_id,
+                        workflow_id=wi.workflow_id,
+                        workflow_type=wi.workflow_type,
+                        workflow_run_id=wi.run_id,
                     )
                 except Exception as e:
                     workflow.logger.error(f"Error processing message: {e}")
                     try:
                         from .message_response_helper import MessageResponseHelper
+                        wi_err = workflow.info()
                         await MessageResponseHelper.send_error_response(
                             message=message,
                             error_message=str(e),
-                            workflow_id=workflow_id,
-                            workflow_type=workflow_type,
+                            workflow_id=wi_err.workflow_id,
+                            workflow_type=wi_err.workflow_type,
                         )
                     except Exception as err:
                         workflow.logger.error(f"Failed to send error response: {err}")

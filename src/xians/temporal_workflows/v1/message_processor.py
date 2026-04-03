@@ -23,6 +23,34 @@ _HANDLER_HINT = {
 }
 
 
+def _id_postfix_from_workflow_memo() -> str | None:
+    """Read idPostfix from workflow memo (Xians / .NET WorkflowConstants.Keys.idPostfix).
+
+    Activities cannot read workflow memo via ``activity.info()``; the workflow passes
+    it through ``ProcessMessageActivityRequest.metadata`` for log ``activation`` and
+    ``XiansContext.safe_id_postfix()`` (before parse-from-workflow-id fallback).
+    """
+    try:
+        if not workflow.in_workflow():
+            return None
+        memo = workflow.memo()
+        logger.debug(
+            "Workflow memo keys=%s",
+            list(memo.keys()) if memo else "[]",
+        )
+        for key, val in memo.items():
+            if val is None:
+                continue
+            norm = str(key).lower().replace("-", "").replace("_", "")
+            if norm == "idpostfix":
+                s = str(val).strip()
+                logger.debug("Found idPostfix in memo: key=%s value=%r", key, s)
+                return s or None
+    except Exception:
+        return None
+    return None
+
+
 class MessageProcessor:
     """Processes inbound messages. Matches C# MessageProcessor.
 
@@ -221,6 +249,20 @@ class MessageProcessor:
             metadata.system_scoped,
         )
 
+        extra_meta: dict[str, str] = {}
+        memo_postfix = _id_postfix_from_workflow_memo()
+        if memo_postfix:
+            extra_meta["idPostfix"] = memo_postfix
+            logger.debug(
+                "Propagating idPostfix=%r to activity metadata (workflow_id=%s)",
+                memo_postfix, workflow_id,
+            )
+        else:
+            logger.debug(
+                "No idPostfix in memo; workflow_id=%s (segments=%d)",
+                workflow_id, len((workflow_id or "").split(":")),
+            )
+
         request = ProcessMessageActivityRequest(
             message_text=payload.text or "",
             participant_id=payload.participant_id or "",
@@ -234,6 +276,7 @@ class MessageProcessor:
             workflow_run_id=workflow_run_id,
             authorization=payload.authorization,
             thread_id=payload.thread_id or "",
+            metadata=extra_meta if extra_meta else None,
             message_type=message_type,
         )
 
