@@ -121,31 +121,61 @@ class UserMessageContext:
         data: Any = None,
         user_message: Optional[str] = None,
     ) -> Optional[str]:
-        """Hand off the conversation to another workflow."""
+        """Hand off the conversation to another workflow.
+
+        Args:
+            target_workflow_id: The workflow ID to hand off to.
+            message: Custom handoff message text. Falls back to current message text.
+            data: Data to pass with handoff. Falls back to current message data.
+            user_message: Optional message to send to the user before the handoff.
+        """
+        if not target_workflow_id:
+            raise ValueError("target_workflow_id cannot be null or empty")
+
+        if user_message:
+            await self.reply_async(user_message)
+
+        if not self.message.thread_id:
+            raise RuntimeError("ThreadId is required for handoff operations")
+
+        text = message or self.message.text or ""
+        if not text:
+            raise RuntimeError("Message text is required for handoff")
+
+        agent_name = ""
+        try:
+            agent = XiansContext.CurrentAgent
+            agent_name = getattr(agent, "name", "") or ""
+        except Exception:
+            pass
+
         request = SendHandoffRequest(
             target_workflow_id=target_workflow_id,
             target_workflow_type="",
-            source_agent="",
+            source_agent=agent_name,
             source_workflow_type=self.message.workflow_type,
             source_workflow_id=self.message.workflow_id,
             thread_id=self.message.thread_id,
             participant_id=self.message.participant_id,
             authorization=self.message.authorization,
-            text=message or user_message or "",
-            data=data,
+            text=text,
+            data=data if data is not None else self.message.data,
             tenant_id=self.message.tenant_id,
         )
         return await self._message_service.send_handoff_async(request)
 
     def _build_send_request(self, text: str, data: Any, msg_type: str) -> SendMessageRequest:
-        """Build a SendMessageRequest from the current context."""
+        """Build a SendMessageRequest from the current context.
+
+        Falls back to Message.Data when data is None (matches C# BuildSendMessageRequest).
+        """
         return SendMessageRequest(
             participant_id=self.message.participant_id,
             workflow_id=self.message.workflow_id,
             workflow_type=self.message.workflow_type,
             request_id=self.message.request_id,
             scope=self.message.scope,
-            data=data,
+            data=data if data is not None else self.message.data,
             authorization=self.message.authorization,
             text=text,
             thread_id=self.message.thread_id,

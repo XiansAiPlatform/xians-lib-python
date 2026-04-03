@@ -10,7 +10,7 @@ from __future__ import annotations
 from temporalio import workflow
 
 
-AGENT_NAME = "Custom Workflow Test Agent"
+AGENT_NAME = "Custom Workflow Test Agent4"
 
 
 @workflow.defn(name=f"{AGENT_NAME}:Custom Input Workflow")

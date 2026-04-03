@@ -1,11 +1,17 @@
 """
 Custom Workflow Test Agent
 
-Demonstrates:
-- Built-in conversational workflow (Supervisor Workflow) using BuiltinWorkflow
-- Custom Temporal workflow that takes start parameters (Input Parameters UI)
-- Context Inspector workflow that validates XiansContext.CurrentAgent /
-  CurrentWorkflow resolve correctly inside a Temporal activity
+Demonstrates ALL messaging features:
+- Built-in conversational workflow (Supervisor Workflow) with:
+  - Chat handler with reasoning/tool progress, proactive messaging, history, handoff, skip_response
+  - Data handler for structured data processing
+  - File upload handler
+  - Webhook handler with WebhookResponse factory methods
+- Custom Temporal workflows:
+  - Custom Input Workflow (start parameter driven)
+  - Context Inspector Workflow (XiansContext validation)
+  - Business Metrics Workflow (metrics API testing)
+  - Messaging Test Workflow (proactive messaging from custom workflow activity)
 
 Run:
   cd examples/custom-workflow-test-agent
@@ -16,6 +22,7 @@ Run:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -27,13 +34,17 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from xians.agents.core import XiansContext
+from xians.agents.messaging import UserMessageContext
+from xians.agents.messaging.webhook_context import WebhookContext
 from xians.interfaces.v1.platform import XiansPlatform
 from xians.models.v1.configs import XiansOptions
 from xians.models.v1.entities import XiansAgentRegistration
+from xians.temporal_workflows.v1.models import WebhookResponse
 
 from custom_input_workflow import AGENT_NAME, CustomInputWorkflow
 from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
 from business_metrics_workflow import BusinessMetricsWorkflow, report_business_metrics
+from messaging_test_workflow import MessagingTestWorkflow, test_proactive_messaging
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +70,15 @@ async def main() -> None:
     agent = platform.agents.register(
         XiansAgentRegistration(
             name=AGENT_NAME,
-            description="Agent to test built-in + custom workflows with input parameters",
-            summary="Custom workflow test agent2",
-            version="0.2.3",
+            description="Agent to test built-in + custom workflows, all messaging features",
+            summary="Custom workflow test agent with full messaging",
+            version="0.3.0",
             author="examples",
             is_template=True,
         )
     )
 
-    # ── Upload local knowledge files (same pattern as web-search-agent) ──
+    # ── Upload local knowledge files ──
     knowledge_files = [
         {
             "resource_path": "knowledge/system-instructions.md",
@@ -127,17 +138,32 @@ async def main() -> None:
                 ex,
             )
 
-    # ── 1) Built-in conversational workflow ──
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 1) Built-in conversational workflow — ALL message handlers
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     builtin_wf = agent.define_builtin_workflow(name="Supervisor Workflow")
 
-    async def handle_chat(context):
-        """Echo handler that also demonstrates CurrentAgent / CurrentWorkflow access."""
+    # ── CHAT HANDLER ──
+    # Demonstrates: reply, reply_with_data, reasoning, tool_exec, proactive,
+    #               history, task_id, skip_response, handoff, metrics
+    async def handle_chat(context: UserMessageContext) -> None:
         text = (context.message.text or "").strip()
         if not text:
-            await context.reply_async("Send me a message and I'll echo it back.")
+            await context.reply_async(
+                "Send me a command:\n"
+                "- `/echo <text>` — echo with progress\n"
+                "- `/history` — get conversation history\n"
+                "- `/taskid` — get last HITL task ID\n"
+                "- `/proactive` — test proactive messaging\n"
+                "- `/data` — reply with structured data\n"
+                "- `/skip` — process silently (skip_response)\n"
+                "- `/reasoning` — send reasoning progress\n"
+                "- `/tool` — send tool execution progress\n"
+                "- anything else — echo with context info"
+            )
             return
 
-        # Report message received metric (tests metrics in builtin workflow)
+        # Report message metric
         try:
             await context.metrics \
                 .with_metric("messages", "received", 1, "count") \
@@ -145,7 +171,106 @@ async def main() -> None:
         except Exception as ex:
             logger.warning("Metrics report failed: %s", ex)
 
-        # Show CurrentAgent / CurrentWorkflow in chat reply for live verification
+        # --- /echo — echo with reasoning/tool progress ---
+        if text.lower().startswith("/echo"):
+            payload = text[5:].strip() or "Hello!"
+            await context.send_reasoning_async(f"Processing echo request: '{payload}'")
+            await context.send_tool_exec_async("echo_processor(text=...)")
+            await context.send_reasoning_async("Formatting response...")
+            await context.reply_async(f"Echo: {payload}")
+            return
+
+        # --- /history — conversation history ---
+        if text.lower() == "/history":
+            history = await context.get_chat_history_async(page=1, page_size=10)
+            if history:
+                lines = [
+                    f"- [{m.direction}] {(m.text or '')[:60]}"
+                    for m in history
+                ]
+                await context.reply_async(
+                    f"Last {len(history)} messages:\n" + "\n".join(lines)
+                )
+            else:
+                await context.reply_async("No conversation history found.")
+            return
+
+        # --- /taskid — last HITL task ID ---
+        if text.lower() == "/taskid":
+            task_id = await context.get_last_task_id_async()
+            await context.reply_async(
+                f"Last task ID: {task_id}" if task_id else "No task ID found."
+            )
+            return
+
+        # --- /proactive — test proactive messaging ---
+        if text.lower() == "/proactive":
+            await context.reply_async(
+                "Testing proactive messaging via XiansContext.Messaging..."
+            )
+
+            # send_chat_async (auto-resolve participant from context)
+            await XiansContext.Messaging.send_chat_async(
+                text="Proactive chat message via XiansContext.Messaging!",
+            )
+
+            # send_data_async
+            await XiansContext.Messaging.send_data_async(
+                text="Proactive data message",
+                data={
+                    "test": "proactive_messaging",
+                    "source": "chat_handler",
+                    "status": "success",
+                },
+            )
+
+            await context.reply_async(
+                "Proactive messages sent! You should see 2 additional messages above."
+            )
+            return
+
+        # --- /data — reply with structured data ---
+        if text.lower() == "/data":
+            await context.reply_async(
+                "Here's a data reply with structured payload:",
+                data={
+                    "agent": XiansContext._resolve_agent_name(),
+                    "workflow_type": XiansContext._resolve_workflow_type(),
+                    "participant": context.message.participant_id,
+                    "scope": context.message.scope,
+                    "metadata": context.metadata,
+                },
+            )
+            return
+
+        # --- /skip — skip response (silent processing) ---
+        if text.lower() == "/skip":
+            context.skip_response = True
+            logger.info("Received /skip — processing silently, no reply sent")
+            await context.reply_async("This should NOT be sent")
+            return
+
+        # --- /reasoning — reasoning progress demo ---
+        if text.lower() == "/reasoning":
+            await context.send_reasoning_async("Step 1: Parsing user intent...")
+            await context.send_reasoning_async("Step 2: Searching knowledge base...")
+            await context.send_reasoning_async("Step 3: Synthesizing response...")
+            await context.reply_async(
+                "Reasoning demo complete! Three reasoning steps were streamed."
+            )
+            return
+
+        # --- /tool — tool execution progress demo ---
+        if text.lower() == "/tool":
+            await context.send_tool_exec_async("search_documents(query='architecture')")
+            await context.send_tool_exec_async("fetch_metadata(doc_id='DOC-001')")
+            await context.send_tool_exec_async("format_response(template='summary')")
+            await context.reply_async(
+                "Tool execution demo complete! Three tool calls were streamed."
+            )
+            return
+
+        # --- Default: echo with context info ---
         try:
             current_agent = XiansContext.CurrentAgent
             current_wf = XiansContext.CurrentWorkflow
@@ -160,7 +285,125 @@ async def main() -> None:
 
     builtin_wf.on_user_chat_message(handle_chat)
 
-    # ── 2) Custom workflow: start-parameter driven ──
+    # ── DATA HANDLER ──
+    # Demonstrates: receiving structured data, send_data_async response
+    async def handle_data(context: UserMessageContext) -> None:
+        data = context.message.data
+        text = context.message.text or ""
+
+        logger.info("Data message received: text=%s", text)
+
+        await context.send_reasoning_async(
+            f"Processing incoming data of type {type(data).__name__}..."
+        )
+
+        result = {
+            "received_text": text,
+            "received_data_type": type(data).__name__,
+            "data_preview": str(data)[:200] if data else None,
+            "participant_id": context.message.participant_id,
+            "scope": context.message.scope,
+            "processed": True,
+        }
+
+        await context.send_data_async(
+            data=result,
+            content="Data message processed",
+        )
+
+    builtin_wf.on_user_data_message(handle_data)
+
+    # ── FILE UPLOAD HANDLER ──
+    # Demonstrates: receiving files, extracting metadata, replying with results
+    async def handle_file(context: UserMessageContext) -> None:
+        raw_data = context.message.data
+        file_name = context.message.text or "uploaded-file"
+
+        if isinstance(raw_data, dict):
+            base64_content = raw_data.get("content", "")
+            file_name = raw_data.get("fileName", file_name)
+            content_type = raw_data.get("contentType", "unknown")
+            file_size = raw_data.get("fileSize")
+        elif isinstance(raw_data, str):
+            base64_content = raw_data
+            content_type = "unknown"
+            file_size = None
+        else:
+            base64_content = str(raw_data) if raw_data else ""
+            content_type = "unknown"
+            file_size = None
+
+        if not base64_content:
+            await context.reply_async("No file data received.")
+            return
+
+        try:
+            file_bytes = base64.b64decode(base64_content)
+            size_kb = len(file_bytes) / 1024
+
+            await context.send_reasoning_async(
+                f"Processing file: {file_name} ({size_kb:.1f} KB)"
+            )
+
+            await context.reply_async(
+                f"File processed!\n"
+                f"- Name: {file_name}\n"
+                f"- Size: {size_kb:.1f} KB ({len(file_bytes)} bytes)\n"
+                f"- Content type: {content_type}",
+                data={
+                    "fileName": file_name,
+                    "sizeBytes": len(file_bytes),
+                    "contentType": content_type,
+                    "status": "processed",
+                },
+            )
+        except Exception as e:
+            await context.reply_async(f"Error processing file: {e}")
+
+    builtin_wf.on_file_upload(handle_file)
+
+    # ── WEBHOOK HANDLER ──
+    # Demonstrates: WebhookContext, respond, respond_with, factory methods
+    async def handle_webhook(context: WebhookContext) -> None:
+        payload = context.webhook.payload
+        scope = context.webhook.scope
+
+        logger.info("Webhook received: scope=%s", scope)
+
+        if isinstance(payload, dict):
+            action = payload.get("action", "")
+
+            if action == "ping":
+                context.respond({"status": "pong", "scope": scope})
+                return
+
+            if action == "status":
+                context.respond({
+                    "agent": AGENT_NAME,
+                    "status": "running",
+                    "scope": scope,
+                })
+                return
+
+            if action == "error_test":
+                context.respond_with(WebhookResponse.bad_request("Test error response"))
+                return
+
+            if action == "not_found_test":
+                context.respond_with(WebhookResponse.not_found("Resource not found"))
+                return
+
+        context.respond({
+            "status": "received",
+            "scope": scope,
+            "payload_type": type(payload).__name__,
+        })
+
+    builtin_wf.on_webhook(handle_webhook)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 2) Custom workflow: start-parameter driven
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     custom_wf = agent.define_custom_workflow(CustomInputWorkflow)
     custom_wf.set_parameter_definitions(
         [
@@ -170,7 +413,9 @@ async def main() -> None:
         ]
     )
 
-    # ── 3) Context Inspector workflow: validates CurrentAgent / CurrentWorkflow ──
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 3) Context Inspector workflow
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     inspector_wf = agent.define_custom_workflow(ContextInspectorWorkflow)
     inspector_wf.add_activity(inspect_context)
     inspector_wf.set_parameter_definitions(
@@ -179,7 +424,9 @@ async def main() -> None:
         ]
     )
 
-    # ── 4) Business Metrics workflow: tests metrics API with different scenarios ──
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 4) Business Metrics workflow
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     metrics_wf = agent.define_custom_workflow(BusinessMetricsWorkflow)
     metrics_wf.add_activity(report_business_metrics)
     metrics_wf.set_parameter_definitions(
@@ -189,6 +436,18 @@ async def main() -> None:
                 "type": "string",
                 "optional": True,
             },
+        ]
+    )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 5) Messaging Test workflow — proactive messaging from a custom workflow
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    messaging_wf = agent.define_custom_workflow(MessagingTestWorkflow)
+    messaging_wf.add_activity(test_proactive_messaging)
+    messaging_wf.set_parameter_definitions(
+        [
+            {"name": "participant_id", "type": "string", "optional": False},
+            {"name": "scenario", "type": "string", "optional": True},
         ]
     )
 

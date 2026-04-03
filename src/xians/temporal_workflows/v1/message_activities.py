@@ -1,5 +1,6 @@
 """Temporal activities for message processing. Matches C# MessageActivities."""
 
+import json
 import logging
 from typing import Optional
 
@@ -9,7 +10,9 @@ from .models import (
     ProcessMessageActivityRequest,
     SendMessageRequest,
     SendHandoffRequest,
+    WorkflowHandlerMetadata,
     DbMessage,
+    WebhookResponse,
 )
 from ...agents.messaging.user_message_context import UserMessageContext
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
@@ -41,16 +44,11 @@ class MessageActivities:
 
         message_type = request.message_type.lower()
 
-        # Debug: log participant_id at activity start to troubleshoot Unknown Participant
-        logger.info(
-            "[DEBUG] ProcessAndSendMessage activity started",
-            extra={
-                "workflow_type": request.workflow_type,
-                "workflow_id": request.workflow_id,
-                "participant_id": request.participant_id,
-                "message_type": message_type,
-                "request_id": request.request_id,
-            },
+        logger.debug(
+            "ProcessAndSendMessage: workflow_type=%s participant_id=%s message_type=%s",
+            request.workflow_type,
+            request.participant_id,
+            message_type,
         )
 
         # Populate XiansContext with workflow and agent identity so that
@@ -85,41 +83,12 @@ class MessageActivities:
                     await handler(context)
 
             elif message_type == "webhook":
-                webhook_msg = WebhookMessage(
-                    participant_id=request.participant_id,
-                    scope=request.scope,
-                    name="",
-                    payload=request.data,
-                    authorization=request.authorization,
-                    request_id=request.request_id,
-                    tenant_id=request.tenant_id,
-                )
-                webhook_context = WebhookContext(webhook=webhook_msg)
-
-                if metadata.webhook_handler:
-                    await metadata.webhook_handler(webhook_context)
-
-                send_req = SendMessageRequest(
-                    participant_id=request.participant_id,
-                    workflow_id=request.workflow_id,
-                    workflow_type=request.workflow_type,
-                    request_id=request.request_id,
-                    scope=request.scope,
-                    data={
-                        "statusCode": webhook_context.response.status_code,
-                        "content": webhook_context.response.content,
-                        "contentType": webhook_context.response.content_type,
-                        "headers": webhook_context.response.headers,
-                    },
-                    text="",
-                    type="webhook",
-                    tenant_id=request.tenant_id,
-                )
-                await self._message_service.send_async(send_req)
+                await self._process_webhook(request, metadata)
 
         except Exception as e:
             logger.error(f"Handler error: {e}")
-            await self._send_error_to_user(request, str(e))
+            if message_type != "webhook":
+                await self._send_error_to_user(request, str(e))
         finally:
             # Clear context to avoid leaking identity across activities
             XiansContext.set_workflow_id(None)
@@ -133,18 +102,12 @@ class MessageActivities:
     @activity.defn(name="SendMessage")
     async def send_message(self, request: SendMessageRequest) -> None:
         """Send an outbound message."""
-        # Debug: log outbound SendMessageRequest to troubleshoot participant routing
-        logger.info(
-            "[DEBUG] SendMessage activity executing",
-            extra={
-                "participant_id": request.participant_id,
-                "workflow_id": request.workflow_id,
-                "workflow_type": request.workflow_type,
-                "type": request.type,
-                "request_id": request.request_id,
-            },
+        logger.debug(
+            "SendMessage: participant_id=%s workflow_id=%s type=%s",
+            request.participant_id,
+            request.workflow_id,
+            request.type,
         )
-        logger.debug("[DEBUG] Full SendMessageRequest: %s", request.__dict__ if hasattr(request, "__dict__") else str(request))
         await self._message_service.send_async(request)
 
     @activity.defn(name="GetMessageHistory")
@@ -189,6 +152,60 @@ class MessageActivities:
     async def send_handoff(self, request: SendHandoffRequest) -> Optional[str]:
         """Send handoff."""
         return await self._message_service.send_handoff_async(request)
+
+    async def _process_webhook(
+        self,
+        request: ProcessMessageActivityRequest,
+        metadata: WorkflowHandlerMetadata,
+    ) -> None:
+        """Process a webhook message. Matches C# MessageActivities.ProcessWebhookAsync.
+
+        On handler exception, sets InternalServerError response (still sends the
+        webhook response back to the server).
+        """
+        payload_data = request.data
+        if isinstance(payload_data, dict):
+            pass
+        elif isinstance(payload_data, str):
+            pass
+        elif payload_data is not None:
+            payload_data = json.dumps(payload_data, default=str)
+
+        webhook_msg = WebhookMessage(
+            participant_id=request.participant_id or "",
+            scope=request.scope or "",
+            name="",
+            payload=payload_data,
+            authorization=request.authorization,
+            request_id=request.request_id or "",
+            tenant_id=request.tenant_id or "",
+        )
+        webhook_context = WebhookContext(webhook=webhook_msg)
+
+        try:
+            if metadata.webhook_handler:
+                await metadata.webhook_handler(webhook_context)
+        except Exception as e:
+            logger.error(f"Webhook handler error: {e}")
+            webhook_context.response = WebhookResponse.internal_server_error(str(e))
+
+        send_req = SendMessageRequest(
+            participant_id=request.participant_id,
+            workflow_id=request.workflow_id,
+            workflow_type=request.workflow_type,
+            request_id=request.request_id,
+            scope=request.scope,
+            data={
+                "statusCode": webhook_context.response.status_code,
+                "content": webhook_context.response.content,
+                "contentType": webhook_context.response.content_type,
+                "headers": webhook_context.response.headers,
+            },
+            text="",
+            type="webhook",
+            tenant_id=request.tenant_id,
+        )
+        await self._message_service.send_async(send_req)
 
     async def _send_error_to_user(
         self, request: ProcessMessageActivityRequest, error_message: str

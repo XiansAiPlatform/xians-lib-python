@@ -234,6 +234,16 @@ class AgentRegistration:
         return self._registration.is_template
 
     @property
+    def http_client(self):
+        """Access the underlying httpx.AsyncClient for HTTP operations.
+
+        Mirrors C# XiansAgent.HttpService.Client. Used internally by
+        UserMessaging and other components that need direct HTTP access
+        from within activity context.
+        """
+        return self._platform.xians_client._client
+
+    @property
     def knowledge(self) -> KnowledgeCollection:
         """Access the agent's knowledge collection (lazy-initialized).
 
