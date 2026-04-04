@@ -50,6 +50,10 @@ from xians.agents.workflow_logs import XiansLogger
 logger = XiansLogger.for_name(__name__)
 logger.log_info("Processing started")
 logger.log_error("Something failed", exc=some_exception)
+
+# Check if a level is enabled (mirrors C# ILogger.IsEnabled)
+if logger.is_enabled(logging.DEBUG):
+    logger.log_debug(f"Expensive debug info: {compute_debug_data()}")
 ```
 
 ## How It Works
@@ -63,18 +67,25 @@ logger.log_error("Something failed", exc=some_exception)
 | `XiansPlatform.initialize()` | Configures log levels, attaches `ApiLoggerHandler` to root Python logger | `platform.py` |
 | `run_all()` → `_register_and_start_workers()` | Starts `LoggingServices` background upload thread | `platform.py` |
 | Activity execution | `XiansContext` populated with workflow identity fields | `message_activity_workflow_logging.py` |
-| Any `logging.*()` call in handler | `ApiLoggerHandler` reads context, enqueues to `LoggingServices` | `api_logger_handler.py` |
+| Any log call via `XiansLogger` | `_get_context_data()` attaches `WorkflowId`, `Agent`, etc. as `extra` on `LogRecord` (mirrors C# `BeginScope`) | `xians_logger.py` |
+| Any `logging.*()` call in handler | `ApiLoggerHandler` reads context from `XiansContext`, enqueues to `LoggingServices` | `api_logger_handler.py` |
 | `run_all()` finally block | `LoggingServices.shutdown()` flushes remaining logs | `platform.py` |
 
 ### 2. XiansLogger (user-facing — mirrors `Logger<T>`)
 
 - **Cached per type/name** — `XiansLogger.for_type(MyClass)` returns the same
-  instance on repeated calls.
+  instance on repeated calls (`ConcurrentDictionary` in C#, `dict` + `Lock` in Python).
+- **Per-call context scoping** — every log call reads `XiansContext` via
+  `_get_context_data()` and attaches `WorkflowId`, `WorkflowRunId`, `WorkflowType`,
+  `Agent`, and `ParticipantId` as `extra` on the Python `LogRecord`. This mirrors
+  C# `Logger<T>.GetContextData()` + `BeginScope(contextData)`.
 - **Workflow-safe routing** — inside Temporal workflows, delegates to
-  `workflow.logger` (replay-safe). Optionally dual-logs to standard Python logger
-  for console + server visibility.
-- **Activity/startup context** — uses standard Python `logging.Logger` with the
-  `ApiLoggerHandler` attached for automatic server upload.
+  `workflow.logger` (replay-safe) with context `extra`. Optionally dual-logs to
+  the standard Python logger for console + server visibility.
+- **Lazy logger initialization** — the underlying `logging.Logger` is created on
+  first use via `_get_logger()`, matching C# `Lazy<ILogger>`.
+- **`is_enabled(level)`** — checks whether a log level is enabled, mirroring
+  C# `ILogger.IsEnabled(LogLevel)`.
 
 ### 3. ApiLoggerHandler (mirrors `ApiLoggerProvider / ApiLogger`)
 
@@ -250,6 +261,42 @@ LoggingServices.initialize(log_service)
 # 4. On shutdown — flush remaining logs
 LoggingServices.shutdown()
 ```
+
+## C# Parity Reference
+
+The Python `XiansLogger` mirrors C# `Logger<T>` / `XiansLogger<T>` method-for-method:
+
+| C# (`Logger<T>`) | Python (`XiansLogger`) | Notes |
+|---|---|---|
+| `Logger<T>.For()` / `Logger.For(Type)` | `XiansLogger.for_type(cls)` / `XiansLogger.for_name(name)` | Cached instances |
+| `ConcurrentDictionary<Type, Logger>` | `dict` + `threading.Lock` (double-check locking) | Same thread-safe caching pattern |
+| `Lazy<ILogger>` | `_get_logger()` (creates on first use) | Deferred logger creation |
+| `GetContextData()` | `_get_context_data()` | Reads `XiansContext.safe_*()` on every log call |
+| `BeginScope(contextData)` | `extra=context_data` on Python `LogRecord` | Context attached to every record |
+| `LogToWorkflowLogger(level, msg, exc, ctx)` | `_log_to_workflow_logger(level, msg, exc, ctx)` | Workflow.Logger + context scope |
+| `LogToStandardLogger(level, msg, exc, ctx)` | `_log_to_standard_logger(level, msg, exc, ctx)` | Standard logger + context scope |
+| `Workflow.InWorkflow` | `_in_workflow()` → `temporalio.workflow.in_workflow()` | Workflow detection |
+| `ILogger.IsEnabled(LogLevel)` | `is_enabled(level)` | Level check |
+| `LogTrace/Debug/Information/Warning/Error/Critical` | `log_trace/debug/info/information/warning/error/critical` | All level methods |
+| `ShouldLogWorkflowToConsole()` | `should_log_workflow_to_console()` | `WORKFLOW_LOG_TO_CONSOLE` env var |
+
+### Context fields attached per log call
+
+| C# field (`GetContextData`) | Python field (`_get_context_data`) | Source |
+|---|---|---|
+| `SafeWorkflowId` → `"WorkflowId"` | `safe_workflow_id()` → `"WorkflowId"` | `XiansContext` |
+| `SafeWorkflowRunId` → `"WorkflowRunId"` | `_get_from_temporal_context("run_id")` → `"WorkflowRunId"` | `XiansContext` |
+| `SafeWorkflowType` → `"WorkflowType"` | `safe_workflow_type()` → `"WorkflowType"` | `XiansContext` |
+| `SafeAgentName` → `"Agent"` | `safe_agent_name()` → `"Agent"` | `XiansContext` |
+| — | `safe_participant_id()` → `"ParticipantId"` | `XiansContext` (Python also includes participant) |
+
+### Class hierarchy simplification
+
+C# uses 6 types: `IXiansLogger`, `TypeBasedLoggerWrapper`, `Logger` (static),
+`XiansLogger` (static), `XiansLogger<T>` (generic), `Logger<T>` (generic).
+Python consolidates all of these into a single `XiansLogger` class with identical
+runtime behavior. C# generics (`XiansLogger<T>`) map to Python string-based keys
+via `XiansLogger.for_type(MyClass)`.
 
 ## Per-Activity Emitter (backward compat)
 

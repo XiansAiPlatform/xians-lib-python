@@ -50,9 +50,6 @@ class LoggingServices:
     _is_initialized = False
     _init_lock = threading.Lock()
 
-    _pending_upload_futures: list[asyncio.Future[None]] = []
-    _futures_lock = threading.Lock()
-
     _workflow_log_service: WorkflowLogService | None = None
     _batch_size: int = DEFAULT_BATCH_SIZE
     _processing_interval_seconds: float = DEFAULT_PROCESSING_INTERVAL_SECONDS

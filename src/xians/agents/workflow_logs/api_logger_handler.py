@@ -22,15 +22,6 @@ from .models import WorkflowLogLevelName, WorkflowLogRequest
 
 __all__ = ["ApiLoggerHandler"]
 
-_PYTHON_TO_WORKFLOW_LEVEL: dict[int, WorkflowLogLevelName] = {
-    logging.DEBUG - 5: WorkflowLogLevelName.Trace,  # custom TRACE
-    logging.DEBUG: WorkflowLogLevelName.Debug,
-    logging.INFO: WorkflowLogLevelName.Information,
-    logging.WARNING: WorkflowLogLevelName.Warning,
-    logging.ERROR: WorkflowLogLevelName.Error,
-    logging.CRITICAL: WorkflowLogLevelName.Critical,
-}
-
 
 def _python_level_to_workflow(level: int) -> WorkflowLogLevelName:
     """Map a Python logging level to the nearest ``WorkflowLogLevelName``."""
