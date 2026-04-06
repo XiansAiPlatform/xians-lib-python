@@ -44,6 +44,7 @@ from xians.temporal_workflows.v1.models import WebhookResponse
 from custom_input_workflow import AGENT_NAME, CustomInputWorkflow
 from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
 from business_metrics_workflow import BusinessMetricsWorkflow, report_business_metrics
+from document_db_test_workflow import DocumentDBTestWorkflow, test_document_db
 from messaging_test_workflow import MessagingTestWorkflow, test_proactive_messaging
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ async def main() -> None:
             name=AGENT_NAME,
             description="Agent to test built-in + custom workflows, all messaging features",
             summary="Custom workflow test agent with full messaging",
-            version="0.3.0",
+            version="0.3.1",
             author="examples",
             is_template=True,
         )
@@ -440,7 +441,18 @@ async def main() -> None:
     )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 5) Messaging Test workflow — proactive messaging from a custom workflow
+    # 5) Document DB Test workflow — full CRUD + query + TTL + upsert
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    docdb_wf = agent.define_custom_workflow(DocumentDBTestWorkflow)
+    docdb_wf.add_activity(test_document_db)
+    docdb_wf.set_parameter_definitions(
+        [
+            {"name": "scenario", "type": "string", "optional": True},
+        ]
+    )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 6) Messaging Test workflow — proactive messaging from a custom workflow
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     messaging_wf = agent.define_custom_workflow(MessagingTestWorkflow)
     messaging_wf.add_activity(test_proactive_messaging)
