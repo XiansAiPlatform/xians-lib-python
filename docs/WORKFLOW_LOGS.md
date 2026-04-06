@@ -14,8 +14,11 @@ src/xians/agents/workflow_logs/
 ├── xians_logger.py         # User-facing Logger (primary API)      ← C# Logger<T> / XiansLogger
 ├── log_emitter.py          # Per-activity emitter (backward compat)
 ├── log_service.py          # HTTP transport (level format negotiation)
+├── trace_utils.py          # OpenTelemetry trace/span IDs (shared by handler + emitter)
 └── models.py               # WorkflowLogRequest model              ← C# Log
 ```
+
+**Public package exports** (`from xians.agents.workflow_logs import …`): `XiansLogger`, `LoggingServices`, `ApiLoggerHandler`, `WorkflowLogEmitter`, `WorkflowLogService`, `WorkflowLogLevelName`, `WorkflowLogRequest`. Lower-level helpers (e.g. `parse_log_level`, `setup_root_logging`) live in `xians.agents.workflow_logs.logger_factory` and are not re-exported from the package root.
 
 ## Quick Start
 
@@ -111,6 +114,8 @@ logger.log_critical("msg", exc=error)
 - Python `logging.Handler` subclass attached to the root logger during platform init.
 - At emit time: reads correlation fields from `XiansContext.safe_*()`, creates a
   `WorkflowLogRequest`, and enqueues to `LoggingServices`.
+- Adds `traceId` / `spanId` when OpenTelemetry is active via shared helper
+  `trace_utils.current_trace_context()` (same helper as `WorkflowLogEmitter`).
 - Includes Temporal message re-classification (e.g. `ActivityFailureException` → Critical).
 
 ### 4. LoggingServices (mirrors `LoggingServices`)
@@ -322,3 +327,5 @@ via `XiansLogger.for_type(MyClass)`.
 The `WorkflowLogEmitter` is still available for explicit per-activity batching.
 It sends milestone logs (e.g. "Workflow message received", "User handler completed")
 and routes failed uploads to the global `LoggingServices` queue as a fallback.
+It uses the same `trace_utils.current_trace_context()` helper as `ApiLoggerHandler`
+for OpenTelemetry `traceId` / `spanId` on emitted records.
