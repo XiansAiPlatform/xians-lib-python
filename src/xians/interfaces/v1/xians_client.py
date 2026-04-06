@@ -397,11 +397,24 @@ class XiansServerClient:
         response = await self._request("POST", "/api/agent/documents/save", json=payload)
         return response.json()
 
-    async def update_document(self, document: dict[str, Any], options: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {"document": document}
+    async def update_document(
+        self,
+        document: dict[str, Any],
+        options: dict[str, Any] | None = None,
+    ) -> Any:
+        """POST /api/agent/documents/update
+
+        The Agent API binds the body directly to ``DocumentDto`` (see
+        ``DocumentEndpoints.MapPost("/update")``), not ``{ document: ... }``.
+        The ``options`` parameter is ignored; kept for backward compatibility.
+        """
         if options is not None:
-            payload["options"] = options
-        response = await self._request("POST", "/api/agent/documents/update", json=payload)
+            logger.debug(
+                "update_document: options=... is ignored; server expects DocumentDto at root only"
+            )
+        response = await self._request(
+            "POST", "/api/agent/documents/update", json=document
+        )
         return response.json()
 
     async def get_document(self, id: str) -> dict[str, Any]:

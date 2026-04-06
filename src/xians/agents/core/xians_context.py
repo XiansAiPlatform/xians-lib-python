@@ -122,6 +122,16 @@ class _XiansContextMeta(type):
         return cls.CurrentAgent.metrics
 
     @property
+    def Documents(cls):
+        """Access document collection for the current agent. Matches C# XiansContext.Documents.
+
+        Use from workflows/activities:
+            doc = await XiansContext.Documents.save_async(document)
+            result = await XiansContext.Documents.get_by_key_async("type", "key")
+        """
+        return cls.CurrentAgent.documents
+
+    @property
     def Messaging(cls):
         """Access proactive messaging helper. Matches C# XiansContext.Messaging.
 

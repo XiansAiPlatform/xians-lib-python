@@ -1,6 +1,12 @@
 """Public API for Xians SDK v1 - Platform entry point."""
 
 from ...agents.core.xians_context import XiansContext
+from ...agents.documents import (
+    Document,
+    DocumentCollection,
+    DocumentOptions,
+    DocumentQuery,
+)
 from ...agents.messaging.message_service import MessageService
 from ...agents.messaging.message_type import MessageType
 from ...agents.messaging.messaging_helper import MessagingHelper
@@ -55,4 +61,8 @@ __all__ = [
     "MessagingHelper",
     "XiansContext",
     "TenantContext",
+    "Document",
+    "DocumentCollection",
+    "DocumentOptions",
+    "DocumentQuery",
 ]

@@ -13,6 +13,8 @@ from typing import Any, Callable, Optional
 from temporalio.client import Client
 
 from ...agents.core.xians_context import XiansContext
+from ...agents.documents import DocumentCollection
+from ...agents.documents.document_activities import DocumentActivities
 from ...agents.knowledge import KnowledgeCollection
 from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
@@ -222,6 +224,7 @@ class AgentRegistration:
         self._workflows: list[XiansWorkflow] = []
         self._knowledge: Optional[KnowledgeCollection] = None
         self._metrics: Optional[MetricsCollection] = None
+        self._documents: Optional[DocumentCollection] = None
 
         XiansContext.register_agent(registration.name, self)
 
@@ -277,6 +280,22 @@ class AgentRegistration:
                 platform=self._platform,
             )
         return self._metrics
+
+    @property
+    def documents(self) -> DocumentCollection:
+        """Access the agent's document collection (lazy-initialized).
+
+        Mirrors C# XiansAgent.Documents, accessible as
+        XiansContext.CurrentAgent.documents.
+        """
+        if self._documents is None:
+            self._documents = DocumentCollection(
+                agent_name=self.name,
+                http_client=self._platform.xians_client,
+                tenant_id=self._tenant_id or "",
+                system_scoped=self.system_scoped,
+            )
+        return self._documents
 
     def define_builtin_workflow(
         self,
@@ -571,6 +590,7 @@ class XiansPlatform:
 
         message_activities = MessageActivities(self._message_service)
         usage_activities = UsageActivities(self.xians_client)
+        document_activities = DocumentActivities(self.xians_client)
 
         for agent_reg in self.agents.all():
             for wf in agent_reg._workflows:
@@ -582,6 +602,7 @@ class XiansPlatform:
                 activity_instances = [
                     message_activities,
                     usage_activities,
+                    document_activities,
                 ] + wf._activity_instances
 
                 task_queue = build_task_queue_name(
@@ -731,4 +752,5 @@ __all__ = [
     "AgentRegistration",
     "XiansWorkflow",
     "KnowledgeCollection",
+    "DocumentCollection",
 ]
