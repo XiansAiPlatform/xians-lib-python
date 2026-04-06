@@ -22,22 +22,9 @@ from datetime import datetime, timezone
 from .log_service import WorkflowLogService
 from .logging_services import LoggingServices
 from .models import WorkflowLogLevelName, WorkflowLogRequest
+from .trace_utils import current_trace_context
 
 logger = logging.getLogger(__name__)
-
-
-def _current_trace_context() -> tuple[str | None, str | None]:
-    """Extract OpenTelemetry trace/span IDs when instrumentation is active."""
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore
-
-        span = otel_trace.get_current_span()
-        ctx = span.get_span_context() if span is not None else None
-        if ctx is None or not getattr(ctx, "is_valid", False):
-            return None, None
-        return format(ctx.trace_id, "032x"), format(ctx.span_id, "016x")
-    except Exception:
-        return None, None
 
 
 class WorkflowLogEmitter:
@@ -90,7 +77,7 @@ class WorkflowLogEmitter:
         if not self._log_service.is_enabled_for(level):
             return
 
-        trace_id, span_id = _current_trace_context()
+        trace_id, span_id = current_trace_context()
         record = WorkflowLogRequest(
             message=message,
             level=level,

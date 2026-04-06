@@ -96,7 +96,7 @@ class MessageProcessor:
         if message_type == "heartbeat":
             try:
                 tenant_id = TenantContext.extract_tenant_id(workflow_id)
-            except (WorkflowIdError, ValueError) as ex:
+            except (WorkflowIdError, ValueError):
                 logger.error(
                     "Failed to extract tenant ID from WorkflowId for heartbeat: %s",
                     workflow_id,
@@ -116,7 +116,7 @@ class MessageProcessor:
                             workflow_id=workflow_id,
                             workflow_type=workflow_type,
                         )
-                    except Exception as send_ex:
+                    except Exception:
                         logger.error(
                             "Failed to send heartbeat unavailable response for WorkflowId=%s",
                             workflow_id,
@@ -135,7 +135,7 @@ class MessageProcessor:
                     workflow_id=workflow_id,
                     workflow_type=workflow_type,
                 )
-            except Exception as send_ex:
+            except Exception:
                 logger.error(
                     "Failed to send heartbeat response for WorkflowId=%s",
                     workflow_id,

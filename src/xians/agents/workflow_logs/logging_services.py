@@ -17,7 +17,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import logging
 import queue
 import sys
 import threading
@@ -30,8 +29,6 @@ from .models import WorkflowLogRequest
 
 if TYPE_CHECKING:
     from .log_service import WorkflowLogService
-
-_logger = logging.getLogger(__name__)
 
 __all__ = ["LoggingServices"]
 

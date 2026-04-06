@@ -13,12 +13,12 @@ Temporal message processing:
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from .logger_factory import get_server_log_level
 from .logging_services import LoggingServices
 from .models import WorkflowLogLevelName, WorkflowLogRequest
+from .trace_utils import current_trace_context
 
 __all__ = ["ApiLoggerHandler"]
 
@@ -59,20 +59,6 @@ def _process_temporal_message(message: str, level: int) -> int:
         return logging.ERROR
 
     return level
-
-
-def _current_trace_context() -> tuple[str | None, str | None]:
-    """Extract OpenTelemetry trace/span IDs when instrumentation is active."""
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore
-
-        span = otel_trace.get_current_span()
-        ctx = span.get_span_context() if span is not None else None
-        if ctx is None or not getattr(ctx, "is_valid", False):
-            return None, None
-        return format(ctx.trace_id, "032x"), format(ctx.span_id, "016x")
-    except Exception:
-        return None, None
 
 
 class ApiLoggerHandler(logging.Handler):
@@ -119,23 +105,11 @@ class ApiLoggerHandler(logging.Handler):
         id_postfix = XiansContext.safe_id_postfix()
         tenant_id = XiansContext.safe_tenant_id()
 
-        trace_id, span_id = _current_trace_context()
+        trace_id, span_id = current_trace_context()
 
         exception_text: str | None = None
         if record.exc_info and record.exc_info[1] is not None:
             exception_text = self.format(record) if record.exc_text is None else record.exc_text
-
-        # Use Workflow.NewGuid inside workflow for determinism (mirror C#);
-        # fall back to uuid4 outside workflow.
-        try:
-            from temporalio.workflow import in_workflow, unsafe
-
-            if in_workflow():
-                log_id = str(unsafe.new_guid())
-            else:
-                log_id = str(uuid.uuid4())
-        except Exception:
-            log_id = str(uuid.uuid4())
 
         log_record = WorkflowLogRequest(
             message=record.getMessage(),

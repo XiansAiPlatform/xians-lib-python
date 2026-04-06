@@ -168,11 +168,7 @@ class MessageActivities:
         upstream-only call shape is preserved via the default.
         """
         payload_data = request.data
-        if isinstance(payload_data, dict):
-            pass
-        elif isinstance(payload_data, str):
-            pass
-        elif payload_data is not None:
+        if payload_data is not None and not isinstance(payload_data, (dict, str)):
             payload_data = json.dumps(payload_data, default=str)
 
         webhook_msg = WebhookMessage(

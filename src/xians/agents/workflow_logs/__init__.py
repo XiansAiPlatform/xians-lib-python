@@ -8,8 +8,8 @@ Public surface::
     # Background log processor (mirrors C# LoggingServices)
     from xians.agents.workflow_logs import LoggingServices
 
-    # Centralized log-level config (mirrors C# LoggerFactory)
-    from xians.agents.workflow_logs import logger_factory
+    # Python logging.Handler for server ingestion
+    from xians.agents.workflow_logs import ApiLoggerHandler
 
     # Per-activity emitter (still available for explicit batching)
     from xians.agents.workflow_logs import WorkflowLogEmitter
