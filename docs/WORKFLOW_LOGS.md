@@ -20,11 +20,11 @@ src/xians/agents/workflow_logs/
 ## Quick Start
 
 Server logging is **automatic** when `server_log_level` is set in `XiansOptions`.
-All standard Python `logging` calls from handler code are captured and uploaded
-with full workflow context — no extra setup required.
+Use `XiansLogger` (the SDK's own logger) in your agent code — it stamps every log
+with workflow context and routes correctly inside Temporal workflows.
 
 ```python
-import logging
+from xians.agents.workflow_logs import XiansLogger
 from xians.models.v1.configs import XiansOptions
 
 # Enable server log upload by setting server_log_level
@@ -36,24 +36,43 @@ platform = await XiansPlatform.initialize(
         console_log_level="DEBUG",        # console output level
     )
 )
-```
 
-Any `logging.info(...)`, `logging.warning(...)`, etc. call made inside an
-activity handler is automatically enriched with `workflowId`, `workflowType`,
-`agent`, `activation`, `tenantId`, and `participantId` from `XiansContext`.
-
-For explicit log calls, `XiansLogger` is also available:
-
-```python
-from xians.agents.workflow_logs import XiansLogger
-
+# Use XiansLogger in your handlers (recommended)
 logger = XiansLogger.for_name(__name__)
 logger.log_info("Processing started")
 logger.log_error("Something failed", exc=some_exception)
+logger.log_warning(f"Retrying after {delay}s", exc=timeout_error)
 
 # Check if a level is enabled (mirrors C# ILogger.IsEnabled)
+import logging
 if logger.is_enabled(logging.DEBUG):
     logger.log_debug(f"Expensive debug info: {compute_debug_data()}")
+```
+
+Standard Python `logging.info(...)` calls also work — `ApiLoggerHandler` catches
+them on the root logger and uploads with context. But `XiansLogger` is recommended
+because it attaches context data (`WorkflowId`, `Agent`, etc.) to every log
+record for all handlers (console, file, third-party), not just the server upload.
+
+### Logger usage pattern
+
+| Where | Logger to use | Why |
+|---|---|---|
+| Your agent code (handlers, services) | `XiansLogger.for_name(__name__)` | Context stamping + C# API parity |
+| SDK activity code (`message_activities.py`, etc.) | `XiansLogger.for_name(__name__)` | Dogfoods the SDK logger in the hot path |
+| SDK infrastructure (`workflow_logs/` package) | `logging.getLogger(__name__)` | Avoids circular imports (XiansLogger is defined there) |
+| Temporal workflow sandbox (`workflows.py`, `message_processor.py`) | `logging.getLogger(__name__)` / `workflow.logger` | Respects Temporal sandbox import restrictions |
+
+All level methods accept an optional `exc` parameter for exception formatting
+(mirrors C# where every `LogXxx` method accepts `Exception?`):
+
+```python
+logger.log_trace("msg", exc=error)
+logger.log_debug("msg", exc=error)
+logger.log_info("msg", exc=error)
+logger.log_warning("msg", exc=error)
+logger.log_error("msg", exc=error)
+logger.log_critical("msg", exc=error)
 ```
 
 ## How It Works
@@ -277,7 +296,7 @@ The Python `XiansLogger` mirrors C# `Logger<T>` / `XiansLogger<T>` method-for-me
 | `LogToStandardLogger(level, msg, exc, ctx)` | `_log_to_standard_logger(level, msg, exc, ctx)` | Standard logger + context scope |
 | `Workflow.InWorkflow` | `_in_workflow()` → `temporalio.workflow.in_workflow()` | Workflow detection |
 | `ILogger.IsEnabled(LogLevel)` | `is_enabled(level)` | Level check |
-| `LogTrace/Debug/Information/Warning/Error/Critical` | `log_trace/debug/info/information/warning/error/critical` | All level methods |
+| `LogTrace/Debug/Information/Warning/Error/Critical(msg, exc?)` | `log_trace/debug/info/information/warning/error/critical(msg, exc=None)` | All level methods accept optional exception |
 | `ShouldLogWorkflowToConsole()` | `should_log_workflow_to_console()` | `WORKFLOW_LOG_TO_CONSOLE` env var |
 
 ### Context fields attached per log call

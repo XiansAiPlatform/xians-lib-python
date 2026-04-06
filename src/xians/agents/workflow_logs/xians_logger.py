@@ -94,21 +94,21 @@ class XiansLogger:
     # Convenience log methods (mirrors C# IXiansLogger interface)
     # ------------------------------------------------------------------
 
-    def log_trace(self, message: str) -> None:
-        self._log(logging.DEBUG - 5, message)
+    def log_trace(self, message: str, exc: BaseException | None = None) -> None:
+        self._log(logging.DEBUG - 5, message, exc=exc)
 
-    def log_debug(self, message: str) -> None:
-        self._log(logging.DEBUG, message)
+    def log_debug(self, message: str, exc: BaseException | None = None) -> None:
+        self._log(logging.DEBUG, message, exc=exc)
 
-    def log_info(self, message: str) -> None:
-        self._log(logging.INFO, message)
+    def log_info(self, message: str, exc: BaseException | None = None) -> None:
+        self._log(logging.INFO, message, exc=exc)
 
-    def log_information(self, message: str) -> None:
+    def log_information(self, message: str, exc: BaseException | None = None) -> None:
         """Alias for ``log_info`` — mirrors C# ``LogInformation``."""
-        self._log(logging.INFO, message)
+        self._log(logging.INFO, message, exc=exc)
 
-    def log_warning(self, message: str) -> None:
-        self._log(logging.WARNING, message)
+    def log_warning(self, message: str, exc: BaseException | None = None) -> None:
+        self._log(logging.WARNING, message, exc=exc)
 
     def log_error(self, message: str, exc: BaseException | None = None) -> None:
         self._log(logging.ERROR, message, exc=exc)

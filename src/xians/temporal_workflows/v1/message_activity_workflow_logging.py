@@ -8,14 +8,13 @@ into this module.
 
 from __future__ import annotations
 
-import logging
 from temporalio import activity
 
 from ...agents.core.xians_context import XiansContext
-from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService
+from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService, XiansLogger
 from .models import ProcessMessageActivityRequest, WorkflowHandlerMetadata
 
-logger = logging.getLogger(__name__)
+logger = XiansLogger.for_name(__name__)
 
 
 def temporal_workflow_id_for_logging(fallback: str | None) -> str:
@@ -89,11 +88,9 @@ def setup_message_activity_context(
     log_participant = (request.participant_id or "").strip() or None
 
     id_postfix = XiansContext.safe_id_postfix()
-    logger.debug(
-        "Activity log context: workflowId=%s workflowType=%s agent=%s "
-        "idPostfix=%s runId=%s participant=%s",
-        log_workflow_id, request.workflow_type, log_agent,
-        id_postfix, workflow_run_id, log_participant,
+    logger.log_debug(
+        f"Activity log context: workflowId={log_workflow_id} workflowType={request.workflow_type} "
+        f"agent={log_agent} idPostfix={id_postfix} runId={workflow_run_id} participant={log_participant}"
     )
 
     return log_workflow_id, workflow_run_id, log_agent, log_participant
@@ -112,7 +109,7 @@ def try_create_workflow_log_emitter(
     if not workflow_logs_service or not log_workflow_id or not request.workflow_type or not log_agent:
         return None
     if not workflow_run_id:
-        logger.debug(
+        logger.log_debug(
             "WorkflowLogEmitter: workflow_run_id missing after Temporal lookup; "
             "emitting without workflowRunId"
         )
@@ -128,7 +125,7 @@ def try_create_workflow_log_emitter(
             tenant_id=request.tenant_id or XiansContext.safe_tenant_id(),
         )
     except Exception:
-        logger.warning("Failed to initialize WorkflowLogEmitter", exc_info=True)
+        logger.log_warning("Failed to initialize WorkflowLogEmitter")
         return None
 
 

@@ -17,7 +17,6 @@ Architecture:
         → context.reply_async(answer)
 """
 
-import logging
 from datetime import datetime, timezone
 
 from langchain_community.tools import DuckDuckGoSearchResults
@@ -26,8 +25,9 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from xians.agents.core import XiansContext
+from xians.agents.workflow_logs import XiansLogger
 
-logger = logging.getLogger(__name__)
+logger = XiansLogger.for_name(__name__)
 
 
 def _extract_token_usage(message) -> tuple[int, int, int] | None:
@@ -88,9 +88,9 @@ async def _report_llm_metrics(context, message) -> None:
                 ("tokens", "total", total_tokens, "tokens"),
             ) \
             .report_async()
-        logger.debug("Reported LLM metrics: prompt=%s completion=%s total=%s", prompt_tokens, completion_tokens, total_tokens)
+        logger.log_debug(f"Reported LLM metrics: prompt={prompt_tokens} completion={completion_tokens} total={total_tokens}")
     except Exception as ex:
-        logger.warning("Failed to report LLM metrics: %s", ex)
+        logger.log_warning(f"Failed to report LLM metrics: {ex}")
 
 DEFAULT_SYSTEM_INSTRUCTIONS = """\
 You are a helpful web search assistant. Your job is to help users find accurate,
@@ -155,10 +155,10 @@ class WebSearchSubAgent:
             agent = XiansContext.CurrentAgent
             knowledge = await agent.knowledge.get_async("system-instructions")
             if knowledge and knowledge.content:
-                logger.info("Loaded system instructions from Knowledge")
+                logger.log_info("Loaded system instructions from Knowledge")
                 return knowledge.content
         except Exception as e:
-            logger.warning("Could not load knowledge: %s — using default prompt", e)
+            logger.log_warning(f"Could not load knowledge: {e} — using default prompt")
 
         return DEFAULT_SYSTEM_INSTRUCTIONS
 
@@ -200,7 +200,7 @@ class WebSearchSubAgent:
                 "any topic — just ask me a question!"
             )
 
-        logger.info(f"Processing search query: {user_text[:80]}...")
+        logger.log_info(f"Processing search query: {user_text[:80]}...")
 
         try:
             # Stream reasoning progress to user (Message Progress feature)
@@ -249,5 +249,5 @@ class WebSearchSubAgent:
             return "I wasn't able to generate a response. Please try rephrasing your question."
 
         except Exception as e:
-            logger.error(f"Agent execution error: {e}", exc_info=True)
+            logger.log_error(f"Agent execution error: {e}", exc=e)
             return f"I encountered an error while searching: {str(e)}"

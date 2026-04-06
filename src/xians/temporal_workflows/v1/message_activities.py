@@ -1,7 +1,6 @@
 """Temporal activities for message processing. Matches C# MessageActivities."""
 
 import json
-import logging
 from typing import Optional
 
 from temporalio import activity
@@ -22,9 +21,9 @@ from .message_activity_workflow_logging import (
 from ...agents.messaging.user_message_context import UserMessageContext
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
 from ...agents.messaging.message_service import MessageService
-from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService
+from ...agents.workflow_logs import WorkflowLogEmitter, WorkflowLogService, XiansLogger
 
-logger = logging.getLogger(__name__)
+logger = XiansLogger.for_name(__name__)
 
 
 class MessageActivities:
@@ -45,16 +44,14 @@ class MessageActivities:
 
         metadata = _handlers_by_workflow_type.get(request.workflow_type)
         if metadata is None:
-            logger.error(f"No handlers for workflow type: {request.workflow_type}")
+            logger.log_error(f"No handlers for workflow type: {request.workflow_type}")
             return
 
         message_type = request.message_type.lower()
 
-        logger.debug(
-            "ProcessAndSendMessage: workflow_type=%s participant_id=%s message_type=%s",
-            request.workflow_type,
-            request.participant_id,
-            message_type,
+        logger.log_debug(
+            f"ProcessAndSendMessage: workflow_type={request.workflow_type} "
+            f"participant_id={request.participant_id} message_type={message_type}"
         )
 
         log_wid, run_id, log_agent, log_participant = setup_message_activity_context(request, metadata)
@@ -96,7 +93,7 @@ class MessageActivities:
         except Exception as e:
             if emitter:
                 await emitter.emit_error("Workflow handler failed", exc=e)
-            logger.error(f"Handler error: {e}")
+            logger.log_error(f"Handler error: {e}", exc=e)
             if message_type != "webhook":
                 await self._send_error_to_user(request, str(e))
         finally:
@@ -107,11 +104,9 @@ class MessageActivities:
     @activity.defn(name="SendMessage")
     async def send_message(self, request: SendMessageRequest) -> None:
         """Send an outbound message."""
-        logger.debug(
-            "SendMessage: participant_id=%s workflow_id=%s type=%s",
-            request.participant_id,
-            request.workflow_id,
-            request.type,
+        logger.log_debug(
+            f"SendMessage: participant_id={request.participant_id} "
+            f"workflow_id={request.workflow_id} type={request.type}"
         )
         await self._message_service.send_async(request)
 
@@ -197,7 +192,7 @@ class MessageActivities:
                     await emitter.emit_info("Dispatching webhook handler")
                 await metadata.webhook_handler(webhook_context)
         except Exception as e:
-            logger.error(f"Webhook handler error: {e}")
+            logger.log_error(f"Webhook handler error: {e}", exc=e)
             webhook_context.response = WebhookResponse.internal_server_error(str(e))
 
         send_req = SendMessageRequest(
@@ -237,4 +232,4 @@ class MessageActivities:
             )
             await self._message_service.send_async(send_req)
         except Exception as e:
-            logger.error(f"Failed to send error to user: {e}")
+            logger.log_error(f"Failed to send error to user: {e}", exc=e)
