@@ -18,6 +18,9 @@ from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
 from ...agents.metrics import MetricsCollection
 from ...agents.metrics.usage_activities import UsageActivities
+from ...agents.workflow_logs import WorkflowLogService
+from ...agents.workflow_logs.logger_factory import configure_log_levels, parse_log_level, setup_root_logging
+from ...agents.workflow_logs.logging_services import LoggingServices
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
 from ...middleware.v1 import initialize_middleware
@@ -60,6 +63,7 @@ class XiansWorkflow:
         tenant_id: Optional[str],
         max_history_length: int = 1000,
         inactivity_timeout: Optional[float] = None,
+        activable: bool = True,
     ):
         self.agent_name = agent_name
         self.workflow_type = workflow_type
@@ -69,6 +73,7 @@ class XiansWorkflow:
         self.tenant_id = None if system_scoped else tenant_id
         self.max_history_length = max_history_length
         self.inactivity_timeout = inactivity_timeout
+        self.activable = activable
         self._activity_instances: list = []
         self._custom_workflow_class: Optional[type] = None
         self._parameter_definitions: list[dict[str, Any]] = []
@@ -192,7 +197,7 @@ class XiansWorkflow:
             "name": self.workflow_name,
             "systemScoped": self.system_scoped,
             "workers": self.workers,
-            "activable": True,
+            "activable": self.activable,
             "activityDefinitions": [
                 {
                     "activityName": "ProcessAndSendMessage",
@@ -284,10 +289,17 @@ class AgentRegistration:
         workers: int = 1,
         max_history_length: int = 1000,
         inactivity_timeout: Optional[float] = None,
+        activable: bool = True,
     ) -> XiansWorkflow:
         """Define a built-in conversational workflow.
 
         Matches C#: xiansAgent.Workflows.DefineBuiltIn(name)
+
+        Args:
+            activable: If True, the server will start separate workflow instances
+                for each named activation (with idPostfix in the workflow ID).
+                Defaults to True. C# built-in uses False; set True when you need
+                per-activation workflow separation in the Auditing UI.
         """
         workflow_type = f"{self.name}:{name}"
         wf = XiansWorkflow(
@@ -299,6 +311,7 @@ class AgentRegistration:
             tenant_id=self._tenant_id,
             max_history_length=max_history_length,
             inactivity_timeout=inactivity_timeout,
+            activable=activable,
         )
         self._workflows.append(wf)
         return wf
@@ -307,8 +320,14 @@ class AgentRegistration:
         self,
         workflow_class: type,
         workers: int = 1,
+        activable: bool = True,
     ) -> XiansWorkflow:
-        """Define a custom workflow class. Matches C# DefineCustom<T>()."""
+        """Define a custom workflow class. Matches C# DefineCustom<T>().
+
+        Args:
+            activable: If True (default, matches C# DefineCustom), the server
+                will start separate workflow instances for each named activation.
+        """
         wf_defn = getattr(workflow_class, "__temporal_workflow_definition", None)
         workflow_type = wf_defn.name if wf_defn else None
 
@@ -331,6 +350,7 @@ class AgentRegistration:
             workers=workers,
             system_scoped=self.system_scoped,
             tenant_id=self._tenant_id,
+            activable=activable,
         )
         wf._custom_workflow_class = workflow_class
         self._workflows.append(wf)
@@ -450,6 +470,12 @@ class XiansPlatform:
             enable_structured=options.enable_structured_logging,
         )
 
+        configure_log_levels(
+            console_log_level=parse_log_level(options.console_log_level),
+            server_log_level=parse_log_level(options.server_log_level) if options.server_log_level else None,
+        )
+        setup_root_logging(enable_api_logging=bool(options.server_log_level))
+
         server_config = XiansServerConfig(
             server_url=str(options.server_url),
             api_key=options.api_key,
@@ -507,6 +533,11 @@ class XiansPlatform:
 
         finally:
             logger.info("Cleaning up resources...")
+            if LoggingServices.is_initialized():
+                try:
+                    LoggingServices.shutdown()
+                except Exception as cleanup_error:
+                    logger.warning(f"Error shutting down LoggingServices: {cleanup_error}")
             if self._worker_host:
                 try:
                     await self._worker_host.shutdown()
@@ -543,6 +574,15 @@ class XiansPlatform:
                         definition = wf.build_definition()
                         definition_hash = compute_definition_hash(definition)
 
+                        logger.info(
+                            "Workflow definition: workflowType=%s activable=%s "
+                            "systemScoped=%s workers=%s",
+                            definition.get("workflowType"),
+                            definition.get("activable"),
+                            definition.get("systemScoped"),
+                            definition.get("workers"),
+                        )
+
                         is_current = await self.xians_client.check_definition_hash(
                             workflow_type=wf.workflow_type,
                             system_scoped=wf.system_scoped,
@@ -569,7 +609,15 @@ class XiansPlatform:
             logger.warning("No Temporal connection. Skipping worker startup.")
             return
 
-        message_activities = MessageActivities(self._message_service)
+        workflow_logs_service = WorkflowLogService(
+            self.xians_client,
+            min_server_log_level=self.options.server_log_level,
+        )
+
+        if self.options.server_log_level and not LoggingServices.is_initialized():
+            LoggingServices.initialize(workflow_logs_service)
+
+        message_activities = MessageActivities(self._message_service, workflow_logs_service)
         usage_activities = UsageActivities(self.xians_client)
 
         for agent_reg in self.agents.all():

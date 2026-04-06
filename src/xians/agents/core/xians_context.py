@@ -1,10 +1,7 @@
 """XiansContext - async context propagation via contextvars. Matches C# XiansContext."""
 
 import contextvars
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import Optional
 
 _current_tenant_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "xians_tenant_id", default=None
@@ -247,7 +244,8 @@ class XiansContext(metaclass=_XiansContextMeta):
         """Get idPostfix from async-local context or workflow ID.
 
         Resolution order (mirrors C# XiansContext.GetIdPostfix):
-        1. Explicit contextvar (_current_id_postfix)
+        1. Explicit contextvar (_current_id_postfix), e.g. from workflow memo forwarded
+           as ``ProcessMessageActivityRequest.metadata`` in ``MessageActivities``
         2. Parse from workflow ID (4th segment, stripped of Temporal timestamp suffix)
         """
         value = _current_id_postfix.get()

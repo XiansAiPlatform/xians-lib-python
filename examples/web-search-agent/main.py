@@ -22,7 +22,6 @@ Environment variables (.env):
 import asyncio
 import base64
 import json
-import logging
 import os
 import sys
 
@@ -34,6 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from xians.agents.core import XiansContext
 from xians.agents.messaging import UserMessageContext
 from xians.agents.messaging.webhook_context import WebhookContext
+from xians.agents.workflow_logs import XiansLogger
 from xians.interfaces.v1.platform import XiansPlatform
 from xians.models.v1.configs import XiansOptions
 from xians.models.v1.entities import XiansAgentRegistration
@@ -41,7 +41,7 @@ from xians.temporal_workflows.v1.models import WebhookResponse
 
 from web_search_sub_agent import WebSearchSubAgent
 
-logger = logging.getLogger(__name__)
+logger = XiansLogger.for_name(__name__)
 
 
 async def main() -> None:
@@ -50,6 +50,8 @@ async def main() -> None:
     openai_api_key = os.environ.get("OPENAI_API_KEY")
     server_url = os.environ.get("XIANS_SERVER_URL")
     xians_api_key = os.environ.get("XIANS_API_KEY")
+    console_log_level = os.environ.get("CONSOLE_LOG_LEVEL", "DEBUG")
+    server_log_level = os.environ.get("SERVER_LOG_LEVEL", "Information")
 
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY not found in environment variables")
@@ -63,13 +65,15 @@ async def main() -> None:
         XiansOptions(
             server_url=server_url,
             api_key=xians_api_key,
+            console_log_level=console_log_level,
+            server_log_level=server_log_level,
         )
     )
 
     # ── Step 2: Register agent ──
     xians_agent = xians_platform.agents.register(
         XiansAgentRegistration(
-            name="Web Search Agent7",
+            name="Web Search AgentV1.5",
             description=(
                 "AI-powered web search assistant that finds and summarizes "
                 "real-time information from the internet using Tavily search."
@@ -96,14 +100,12 @@ async def main() -> None:
         try:
             success = await xians_agent.knowledge.upload_from_file(**kf)
             if success:
-                logger.info("Uploaded knowledge: %s", kf["knowledge_name"])
+                logger.log_info(f"Uploaded knowledge: {kf['knowledge_name']}")
             else:
-                logger.warning("Failed to upload knowledge: %s", kf["knowledge_name"])
+                logger.log_warning(f"Failed to upload knowledge: {kf['knowledge_name']}")
         except Exception as ex:
-            logger.warning(
-                "Failed to upload knowledge '%s': %s. Agent will continue with defaults.",
-                kf["knowledge_name"],
-                ex,
+            logger.log_warning(
+                f"Failed to upload knowledge '{kf['knowledge_name']}': {ex}. Agent will continue with defaults."
             )
 
     # ── Step 4: Define workflow ──
@@ -176,7 +178,7 @@ async def main() -> None:
         data = context.message.data
         text = context.message.text or ""
 
-        logger.info("Data message received: text=%s data_type=%s", text, type(data).__name__)
+        logger.log_info(f"Data message received: text={text} data_type={type(data).__name__}")
 
         result = {
             "received_text": text,
@@ -267,10 +269,7 @@ async def main() -> None:
         scope = context.webhook.scope
         name = context.webhook.name
 
-        logger.info(
-            "Webhook received: scope=%s name=%s payload_type=%s",
-            scope, name, type(payload).__name__,
-        )
+        logger.log_info(f"Webhook received: scope={scope} name={name} payload_type={type(payload).__name__}")
 
         if isinstance(payload, dict) and payload.get("action") == "ping":
             _respond_webhook_json(context, {"status": "pong", "scope": scope})

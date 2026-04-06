@@ -288,6 +288,18 @@ class XiansServerClient:
         """
         await self._request("POST", "/api/agent/usage/report", json=payload)
 
+    # --- Workflow Logs ---
+
+    async def upload_agent_logs(self, payload: list[dict[str, Any]]) -> None:
+        """Upload workflow logs.
+
+        Endpoint:
+            POST /api/agent/logs
+        Body:
+            JSON array of log request objects.
+        """
+        await self._request("POST", "/api/agent/logs", json=payload)
+
     # --- Knowledge Endpoints (aligned with C# ServerKnowledgeProvider) ---
 
     async def get_latest_knowledge(
