@@ -108,20 +108,30 @@ Two independent thresholds control where logs go:
 | **console_log_level**| Terminal / console  | `INFO`      |
 | **server_log_level** | Xians server        | *Disabled*  |
 
-With `console_log_level="DEBUG"` and `server_log_level="INFO"`:
+With `console_log_level="INFO"` and `server_log_level="TRACE"`:
 
-- **Console** shows: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
-- **Server** receives: INFO, WARNING, ERROR, CRITICAL
+- **Console** shows: INFO, WARNING, ERROR, CRITICAL
+- **Server** receives: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+Console and server levels are **completely independent** — the server can receive
+TRACE-level logs even when the console only shows INFO and above. This matches the
+C# behavior where `builder.SetMinimumLevel(LogLevel.Trace)` ensures the API
+provider receives all records while the console handler filters independently.
 
 ```
 Your Code                Console              Server
-   ├─ trace()         ────┼──> Displayed       │     (Below server threshold)
-   ├─ debug()         ────┼──> Displayed       │     (Console only)
+   ├─ trace()         ────┼────────────────────┼──> Uploaded
+   ├─ debug()         ────┼────────────────────┼──> Uploaded
    ├─ info()          ────┼──> Displayed   ────┼──> Uploaded
    ├─ warning()       ────┼──> Displayed   ────┼──> Uploaded
    ├─ error()         ────┼──> Displayed   ────┼──> Uploaded
    └─ critical()      ────┼──> Displayed   ────┼──> Uploaded
 ```
+
+> **Note:** `httpcore`, `httpx`, and other HTTP transport loggers are always pinned
+> to WARNING on the console (even with `console_log_level=TRACE`) to prevent
+> connection-pool noise. They are also excluded from server upload to avoid
+> feedback loops. This matches C#'s `AddFilter("Microsoft", ...)` / `AddFilter("System", ...)`.
 
 ### Enable Server Upload
 
