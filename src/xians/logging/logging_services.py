@@ -10,7 +10,7 @@ import asyncio
 import logging
 import threading
 from collections import deque
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -30,6 +30,11 @@ class LoggingServices:
         2. Logs are enqueued via ``enqueue_log(log)``
         3. A background thread periodically uploads batches
         4. ``shutdown()`` — flushes remaining logs and stops the thread
+
+    The background thread creates its own ``httpx.AsyncClient`` so it has a
+    dedicated asyncio event loop and connection pool.  This avoids the
+    "bound to a different event loop" ``RuntimeError`` that occurs when an
+    ``AsyncClient`` created on the main loop is reused from a second loop.
     """
 
     _instance: Optional[LoggingServices] = None
@@ -38,7 +43,7 @@ class LoggingServices:
     def __init__(self) -> None:
         self._queue: deque[Log] = deque()
         self._queue_lock = threading.Lock()
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._http_client_kwargs: dict[str, Any] = {}
         self._is_initialized = False
         self._processing_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -78,7 +83,10 @@ class LoggingServices:
         """Start the background log processor.
 
         Args:
-            http_client: The shared ``httpx.AsyncClient`` used for API calls.
+            http_client: A reference ``httpx.AsyncClient`` whose base URL,
+                         headers, timeout and TLS settings are copied so that
+                         the background thread can create its own client on a
+                         dedicated event loop.
             server_log_level: Minimum Python logging level for server upload.
                               Logs below this level are silently discarded.
         """
@@ -87,7 +95,11 @@ class LoggingServices:
                 print("[LoggingServices] Already initialized, skipping")
             return
 
-        self._http_client = http_client
+        self._http_client_kwargs = {
+            "base_url": str(http_client.base_url),
+            "timeout": http_client.timeout,
+            "headers": dict(http_client.headers),
+        }
         self._server_log_level = server_log_level
         self._stop_event.clear()
         self._start_processor()
@@ -184,18 +196,20 @@ class LoggingServices:
     def _process_loop(self) -> None:
         loop = asyncio.new_event_loop()
         self._event_loop = loop
+        client = httpx.AsyncClient(**self._http_client_kwargs)
         try:
             while not self._stop_event.is_set():
                 try:
-                    loop.run_until_complete(self._process_batch())
+                    loop.run_until_complete(self._process_batch(client))
                 except Exception as exc:
                     print(f"[LoggingServices] Error in processing thread: {exc}")
                 self._stop_event.wait(self._processing_interval_s)
         finally:
+            loop.run_until_complete(client.aclose())
             loop.close()
             self._event_loop = None
 
-    async def _process_batch(self) -> None:
+    async def _process_batch(self, client: httpx.AsyncClient) -> None:
         with self._queue_lock:
             if not self._queue:
                 if self._verbose_diagnostics:
@@ -214,20 +228,16 @@ class LoggingServices:
             f"[LoggingServices] Uploading batch of {len(batch)} logs, "
             f"{remaining} remaining in queue"
         )
-        await self._send_batch(batch)
+        await self._send_batch(client, batch)
 
-    async def _send_batch(self, logs: list[Log]) -> None:
-        if not self._http_client:
-            print("[LoggingServices] WARNING: HTTP client is null, cannot upload logs")
-            self._requeue(logs)
-            return
-
+    async def _send_batch(self, client: httpx.AsyncClient, logs: list[Log]) -> None:
         try:
             payload = [
-                log.model_dump(by_alias=True, exclude_none=True) for log in logs
+                log.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for log in logs
             ]
 
-            response = await self._http_client.post(XIANS_API_LOGS, json=payload)
+            response = await client.post(XIANS_API_LOGS, json=payload)
 
             if response.is_success:
                 print(f"[LoggingServices] Successfully uploaded {len(logs)} logs to server")
@@ -271,15 +281,17 @@ class LoggingServices:
     def _flush_remaining(self) -> None:
         """Synchronously flush all queued logs on shutdown."""
         loop = asyncio.new_event_loop()
+        client = httpx.AsyncClient(**self._http_client_kwargs)
         try:
             while True:
                 with self._queue_lock:
                     if not self._queue:
                         break
-                loop.run_until_complete(self._process_batch())
+                loop.run_until_complete(self._process_batch(client))
         except Exception as exc:
             print(f"[LoggingServices] Error during flush: {exc}")
         finally:
+            loop.run_until_complete(client.aclose())
             loop.close()
 
 

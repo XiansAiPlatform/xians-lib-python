@@ -110,11 +110,12 @@ Two independent thresholds control where logs go:
 
 With `console_log_level="DEBUG"` and `server_log_level="INFO"`:
 
-- **Console** shows: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- **Console** shows: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
 - **Server** receives: INFO, WARNING, ERROR, CRITICAL
 
 ```
 Your Code                Console              Server
+   ├─ trace()         ────┼──> Displayed       │     (Below server threshold)
    ├─ debug()         ────┼──> Displayed       │     (Console only)
    ├─ info()          ────┼──> Displayed   ────┼──> Uploaded
    ├─ warning()       ────┼──> Displayed   ────┼──> Uploaded
@@ -148,13 +149,17 @@ SERVER_LOG_LEVEL=INFO
 
 ### Log Levels Reference
 
-| Level       | Python Constant    | Server Name     | Example                            |
-|-------------|--------------------|-----------------|------------------------------------|
-| `DEBUG`     | `logging.DEBUG`    | `Debug`         | "Fetched 4 generic news sources"   |
-| `INFO`      | `logging.INFO`     | `Information`   | "News search completed"            |
-| `WARNING`   | `logging.WARNING`  | `Warning`       | "Skipping item with no link"       |
-| `ERROR`     | `logging.ERROR`    | `Error`         | "Workflow failed: connection timeout" |
-| `CRITICAL`  | `logging.CRITICAL` | `Critical`      | "Database connection lost"          |
+| Level       | Python Constant    | Value | Server Name     | Example                            |
+|-------------|--------------------|----|------------------|------------------------------------|
+| `TRACE`     | `logging.TRACE`    | 5  | `Trace`          | "Entering method X with param Y"   |
+| `DEBUG`     | `logging.DEBUG`    | 10 | `Debug`          | "Fetched 4 generic news sources"   |
+| `INFO`      | `logging.INFO`     | 20 | `Information`    | "News search completed"            |
+| `WARNING`   | `logging.WARNING`  | 30 | `Warning`        | "Skipping item with no link"       |
+| `ERROR`     | `logging.ERROR`    | 40 | `Error`          | "Workflow failed: connection timeout" |
+| `CRITICAL`  | `logging.CRITICAL` | 50 | `Critical`       | "Database connection lost"          |
+
+> The `TRACE` level is automatically registered when `xians.logging` is imported.
+> Use `logger.trace("message")` just like any other level.
 
 ---
 

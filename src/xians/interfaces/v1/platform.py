@@ -486,8 +486,9 @@ class XiansPlatform:
         )
         if server_log_level_str:
             import logging as _logging
+            from ...logging.trace_level import TRACE as _TRACE
             _level_map = {
-                "TRACE": _logging.DEBUG,
+                "TRACE": _TRACE,
                 "DEBUG": _logging.DEBUG,
                 "INFO": _logging.INFO,
                 "INFORMATION": _logging.INFO,

@@ -14,8 +14,10 @@ from typing import Optional
 from ..agents.core.xians_context import XiansContext
 from .logging_services import LoggingServices
 from .models.log import Log
+from .trace_level import TRACE
 
 _LEVEL_MAP: dict[int, str] = {
+    TRACE: "Trace",
     logging.DEBUG: "Debug",
     logging.INFO: "Information",
     logging.WARNING: "Warning",
@@ -26,9 +28,20 @@ _LEVEL_MAP: dict[int, str] = {
 
 def _python_level_to_server(level: int) -> str:
     """Map Python logging level to the C# LogLevel name expected by the server."""
+    if level <= TRACE:
+        return "Trace"
     if level <= logging.DEBUG:
         return "Debug"
     return _LEVEL_MAP.get(level, "Information")
+
+
+_EXCLUDED_LOGGER_PREFIXES = (
+    "httpx",
+    "httpcore",
+    "hpack",
+    "urllib3",
+    "asyncio",
+)
 
 
 class ApiLogHandler(logging.Handler):
@@ -36,12 +49,20 @@ class ApiLogHandler(logging.Handler):
 
     Respects the server log level configured in LoggingServices — records below
     that threshold are silently ignored (they still reach the console handler).
+
+    HTTP transport loggers (httpx, httpcore, etc.) are excluded to prevent a
+    feedback loop where the log upload POST generates its own debug logs that
+    get re-enqueued endlessly.  This mirrors the C# LoggerFactory filter that
+    excludes ``Microsoft.*`` and ``System.*`` from the ApiLoggerProvider.
     """
 
     def __init__(self, level: int = logging.NOTSET) -> None:
         super().__init__(level)
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.name.startswith(_EXCLUDED_LOGGER_PREFIXES):
+            return
+
         svc = LoggingServices.get_instance()
         if not svc.is_initialized:
             return

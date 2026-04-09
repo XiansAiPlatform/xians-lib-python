@@ -17,6 +17,13 @@ def configure_logging(
     log_file: Path | None = None,
     log_format: str | None = None,
 ) -> None:
+    # Ensure custom TRACE level is registered before resolving the name.
+    try:
+        from ...logging.trace_level import register_trace_level
+        register_trace_level()
+    except ImportError:
+        pass
+
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {log_level}")
