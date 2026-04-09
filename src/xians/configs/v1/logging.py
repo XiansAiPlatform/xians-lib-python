@@ -10,6 +10,32 @@ try:
 except ImportError:
     STRUCTLOG_AVAILABLE = False
 
+# HTTP transport loggers that are always suppressed on the console.
+# Matches C#: builder.AddFilter("Microsoft", consoleLogLevel)
+#                    .AddFilter("System", consoleLogLevel)
+_NOISY_LOGGERS = ("httpcore", "httpx", "hpack", "urllib3")
+
+
+def _get_root_level(console_level: int) -> int:
+    """Return the lowest possible root level so the ApiLogHandler receives
+    all records regardless of the console threshold.
+
+    Matches C#: ``builder.SetMinimumLevel(LogLevel.Trace)``
+    The console handler's own ``setLevel()`` still gates console output.
+    """
+    try:
+        from ...logging.trace_level import TRACE as _TRACE
+        return min(console_level, _TRACE)
+    except ImportError:
+        return console_level
+
+
+def _suppress_noisy_loggers() -> None:
+    """Pin HTTP transport loggers to WARNING so their DEBUG/TRACE chatter
+    never reaches the console, even when ``console_log_level=TRACE``."""
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 def configure_logging(
     log_level: str = "INFO",
@@ -17,6 +43,12 @@ def configure_logging(
     log_file: Path | None = None,
     log_format: str | None = None,
 ) -> None:
+    try:
+        from ...logging.trace_level import register_trace_level
+        register_trace_level()
+    except ImportError:
+        pass
+
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {log_level}")
@@ -69,9 +101,10 @@ def _configure_structlog(log_level: int, log_file: Path | None = None) -> None:
         handlers.append(file_handler)
 
     logging.basicConfig(
-        level=log_level,
+        level=_get_root_level(log_level),
         handlers=handlers,
     )
+    _suppress_noisy_loggers()
 
 
 def _configure_standard_logging(
@@ -100,11 +133,12 @@ def _configure_standard_logging(
         handlers.append(file_handler)
 
     logging.basicConfig(
-        level=log_level,
+        level=_get_root_level(log_level),
         handlers=handlers,
         format=log_format,
         force=True,
     )
+    _suppress_noisy_loggers()
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -130,4 +164,3 @@ __all__ = [
     "LoggerMixin",
     "STRUCTLOG_AVAILABLE",
 ]
-

@@ -35,13 +35,14 @@ from xians.agents.core import XiansContext
 from xians.agents.messaging import UserMessageContext
 from xians.agents.messaging.webhook_context import WebhookContext
 from xians.interfaces.v1.platform import XiansPlatform
+from xians.logging import LoggingServices, XiansLogger
 from xians.models.v1.configs import XiansOptions
 from xians.models.v1.entities import XiansAgentRegistration
 from xians.temporal_workflows.v1.models import WebhookResponse
 
 from web_search_sub_agent import WebSearchSubAgent
 
-logger = logging.getLogger(__name__)
+logger = XiansLogger.for_type("examples.web_search_agent.main")
 
 
 async def main() -> None:
@@ -63,6 +64,8 @@ async def main() -> None:
         XiansOptions(
             server_url=server_url,
             api_key=xians_api_key,
+            console_log_level=os.environ.get("CONSOLE_LOG_LEVEL", "INFO"),
+            server_log_level=os.environ.get("SERVER_LOG_LEVEL", "DEBUG"),
         )
     )
 
@@ -157,6 +160,22 @@ async def main() -> None:
             task_id = await context.get_last_task_id_async()
             await context.reply_async(
                 f"Last task ID: {task_id}" if task_id else "No task ID found."
+            )
+            return
+
+        # --- Command: /logtest — emit logs at all levels + queue stats ---
+        if text.lower() == "/logtest":
+            logger.debug("Log test: debug")
+            logger.info("Log test: info")
+            logger.warning("Log test: warning")
+            logger.error("Log test: error")
+            svc = LoggingServices.get_instance()
+            queued, retrying = svc.get_stats()
+            await context.reply_async(
+                "Logging test emitted.\n"
+                f"- queued={queued}\n"
+                f"- retrying={retrying}\n"
+                "Check console/server logs for entries."
             )
             return
 

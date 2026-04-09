@@ -22,6 +22,8 @@ from ...agents.metrics import MetricsCollection
 from ...agents.metrics.usage_activities import UsageActivities
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
+from ...logging.logging_services import LoggingServices
+from ...logging.xians_logger import install_api_handler_on_root
 from ...middleware.v1 import initialize_middleware
 from ...models.v1.configs import (
     CertificateInfo,
@@ -476,6 +478,39 @@ class XiansPlatform:
         )
         xians_client = XiansServerClient(server_config)
 
+        # Initialize server logging (matches C# LoggingServices.Initialize)
+        server_log_level_str = (
+            options.server_log_level
+            or os.environ.get("SERVER_LOG_LEVEL")
+            or os.environ.get("API_LOG_LEVEL")
+        )
+        if server_log_level_str:
+            import logging as _logging
+            from ...logging.trace_level import TRACE as _TRACE
+            _level_map = {
+                "TRACE": _TRACE,
+                "DEBUG": _logging.DEBUG,
+                "INFO": _logging.INFO,
+                "INFORMATION": _logging.INFO,
+                "WARNING": _logging.WARNING,
+                "WARN": _logging.WARNING,
+                "ERROR": _logging.ERROR,
+                "CRITICAL": _logging.CRITICAL,
+            }
+            server_log_level = _level_map.get(
+                server_log_level_str.strip().upper(), _logging.WARNING
+            )
+
+            logging_svc = LoggingServices.get_instance()
+            logging_svc.initialize(
+                http_client=xians_client._client,
+                server_log_level=server_log_level,
+            )
+            install_api_handler_on_root()
+            logger.info(
+                f"Server logging enabled (level: {server_log_level_str.upper()})"
+            )
+
         temporal_config = options.temporal
         if temporal_config is None and not options.local_mode:
             logger.info("Fetching Temporal settings from Xians Server...")
@@ -526,6 +561,12 @@ class XiansPlatform:
 
         finally:
             logger.info("Cleaning up resources...")
+            try:
+                logging_svc = LoggingServices.get_instance()
+                if logging_svc.is_initialized:
+                    logging_svc.shutdown()
+            except Exception as cleanup_error:
+                logger.warning(f"Error flushing logs: {cleanup_error}")
             if self._worker_host:
                 try:
                     await self._worker_host.shutdown()
@@ -649,6 +690,14 @@ class XiansPlatform:
         logger.info("Shutting down Xians Platform...")
 
         errors = []
+
+        # Flush server logs before tearing down the HTTP client
+        try:
+            logging_svc = LoggingServices.get_instance()
+            if logging_svc.is_initialized:
+                logging_svc.shutdown()
+        except Exception as e:
+            errors.append(f"LoggingServices shutdown error: {e}")
 
         try:
             if self._worker_host:

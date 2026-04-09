@@ -68,6 +68,7 @@ XIANS_API_LAST_TASK_ID = "/api/agent/conversation/last-task-id"
 XIANS_API_KNOWLEDGE = "/api/agent/knowledge"
 XIANS_API_DOCUMENTS = "/api/agent/documents"
 XIANS_API_USAGE_REPORT = "/api/agent/usage/report"
+XIANS_API_LOGS = "api/agent/logs"
 
 # Deprecated paths (kept for backward compat)
 XIANS_API_BASE_PATH = "/api/v1"
@@ -103,6 +104,7 @@ __all__ = [
     "XIANS_API_KNOWLEDGE",
     "XIANS_API_DOCUMENTS",
     "XIANS_API_USAGE_REPORT",
+    "XIANS_API_LOGS",
     "XIANS_API_BASE_PATH",
     "XIANS_AGENT_PATH",
     "XIANS_WORKFLOW_PATH",

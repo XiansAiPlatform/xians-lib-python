@@ -1,11 +1,12 @@
 # Custom Workflow Test Agent
 
-An example agent that demonstrates **four** workflow types:
+An example agent that demonstrates **five** workflow types:
 
 - A **Built-in conversational workflow** (`Supervisor Workflow`) using `BuiltinWorkflow` + `on_user_chat_message(...)`
 - A **Custom Temporal workflow** that takes **start parameters** (so the Xians UI shows **Input Parameters**)
 - A **Context Inspector workflow** that validates `XiansContext.CurrentAgent` / `CurrentWorkflow` resolve correctly inside a Temporal activity
 - A **Business Metrics workflow** that tests the metrics API with different scenarios (approvals, documents, emails, performance, tags)
+- A **Logging Test workflow** that emits logs at multiple levels and validates queue stats for server upload
 
 This is useful for validating that the Python SDK matches C# behavior around:
 
@@ -49,6 +50,12 @@ This is useful for validating that the Python SDK matches C# behavior around:
   - **mixed**: combined metrics with custom identifier and single metadata (`with_metadata`)
   - **tags**: bulk metadata via `with_metadata_dict(custom_tags)` — e.g. `{"version": "2.1.0", "region": "us-east-1", "environment": "staging"}`
 - The built-in chat handler also reports `messages.received` on each echo
+
+### 5) Custom: `Logging Test Workflow`
+- Type: `{AgentName}:Logging Test Workflow`
+- Trigger: **Start workflow** with an optional `scenario` parameter
+- Scenarios: `basic` | `error` | `all` (default: `all`)
+- Emits logs using both `XiansLogger` and standard Python logging, then returns queued/retrying stats from `LoggingServices`
 
 ## Setup
 

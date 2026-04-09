@@ -46,6 +46,8 @@ from context_inspector_workflow import ContextInspectorWorkflow, inspect_context
 from business_metrics_workflow import BusinessMetricsWorkflow, report_business_metrics
 from document_db_test_workflow import DocumentDBTestWorkflow, test_document_db
 from messaging_test_workflow import MessagingTestWorkflow, test_proactive_messaging
+from logging_test_activities import run_logging_test
+from logging_test_workflow import LoggingTestWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,8 @@ async def main() -> None:
         XiansOptions(
             server_url=server_url,
             api_key=xians_api_key,
+            console_log_level=os.environ.get("CONSOLE_LOG_LEVEL", "INFO"),
+            server_log_level=os.environ.get("SERVER_LOG_LEVEL", "TRACE")
         )
     )
 
@@ -459,6 +463,17 @@ async def main() -> None:
     messaging_wf.set_parameter_definitions(
         [
             {"name": "participant_id", "type": "string", "optional": False},
+            {"name": "scenario", "type": "string", "optional": True},
+        ]
+    )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 7) Logging Test workflow — verifies XiansLogger + server log queue
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    logging_wf = agent.define_custom_workflow(LoggingTestWorkflow)
+    logging_wf.add_activity(run_logging_test)
+    logging_wf.set_parameter_definitions(
+        [
             {"name": "scenario", "type": "string", "optional": True},
         ]
     )

@@ -15,6 +15,7 @@ from ...agents.messaging.user_messaging import UserMessaging
 from ...agents.messaging.webhook_context import WebhookContext, WebhookMessage
 from ...configs.v1 import LLMConfig, TemporalConfig, XiansOptions, XiansServerConfig
 from ...constants.v1 import WorkflowType
+from ...logging import TRACE, LoggingServices, XiansLogger
 from ...interfaces.v1 import (
     AgentClient,
     AgentRegistration,
@@ -65,4 +66,7 @@ __all__ = [
     "DocumentCollection",
     "DocumentOptions",
     "DocumentQuery",
+    "LoggingServices",
+    "XiansLogger",
+    "TRACE",
 ]

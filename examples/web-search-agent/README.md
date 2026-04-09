@@ -85,3 +85,15 @@ The agent has access to:
 ## Metrics
 
 LLM token usage (prompt, completion, total) is automatically reported to the Xians metrics API after each agent response. This uses `context.metrics` with token counts extracted from the LangChain/LangGraph response metadata.
+
+## Logging Test
+
+This example is wired for Xians server logging (`server_log_level` defaults to `INFO` in code).  
+Use the chat command:
+
+- `/logtest` — emits debug/info/warning/error logs and replies with current queue stats.
+
+You can also override levels with environment variables:
+
+- `CONSOLE_LOG_LEVEL=DEBUG`
+- `SERVER_LOG_LEVEL=INFO`
