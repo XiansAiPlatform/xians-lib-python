@@ -564,7 +564,7 @@ class XiansPlatform:
             try:
                 logging_svc = LoggingServices.get_instance()
                 if logging_svc.is_initialized:
-                    logging_svc.shutdown()
+                    await logging_svc.shutdown_async()
             except Exception as cleanup_error:
                 logger.warning(f"Error flushing logs: {cleanup_error}")
             if self._worker_host:
@@ -695,7 +695,7 @@ class XiansPlatform:
         try:
             logging_svc = LoggingServices.get_instance()
             if logging_svc.is_initialized:
-                logging_svc.shutdown()
+                await logging_svc.shutdown_async()
         except Exception as e:
             errors.append(f"LoggingServices shutdown error: {e}")
 
