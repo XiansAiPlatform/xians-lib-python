@@ -159,15 +159,43 @@ class LoggingServices:
     # ------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        """Flush remaining logs and stop the background thread."""
+        """Flush remaining logs and stop the background thread.
+
+        Backwards-compatible synchronous entrypoint. If called while an event
+        loop is already running, execute shutdown in a dedicated thread so this
+        method remains safe to call from async code paths.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.shutdown_async())
+            return
+
+        exc_holder: list[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                asyncio.run(self.shutdown_async())
+            except BaseException as exc:  # pragma: no cover - defensive passthrough
+                exc_holder.append(exc)
+
+        worker = threading.Thread(target=_runner, name="XiansLogShutdownThread", daemon=True)
+        worker.start()
+        worker.join()
+
+        if exc_holder:
+            raise exc_holder[0]
+
+    async def shutdown_async(self) -> None:
+        """Flush remaining logs and stop the background thread (async-safe)."""
         print("[LoggingServices] Shutting down, flushing logs...")
 
         self._stop_event.set()
 
         if self._processing_thread and self._processing_thread.is_alive():
-            self._processing_thread.join(timeout=5.0)
+            await asyncio.to_thread(self._processing_thread.join, 5.0)
 
-        self._flush_remaining()
+        await self._flush_remaining_async()
 
         self._is_initialized = False
         self._retry_counts.clear()
@@ -278,21 +306,19 @@ class LoggingServices:
                         f"{_MAX_RETRIES} failed attempts"
                     )
 
-    def _flush_remaining(self) -> None:
-        """Synchronously flush all queued logs on shutdown."""
-        loop = asyncio.new_event_loop()
+    async def _flush_remaining_async(self) -> None:
+        """Flush all queued logs on shutdown."""
         client = httpx.AsyncClient(**self._http_client_kwargs)
         try:
             while True:
                 with self._queue_lock:
                     if not self._queue:
                         break
-                loop.run_until_complete(self._process_batch(client))
+                await self._process_batch(client)
         except Exception as exc:
             print(f"[LoggingServices] Error during flush: {exc}")
         finally:
-            loop.run_until_complete(client.aclose())
-            loop.close()
+            await client.aclose()
 
 
 # Module-level convenience functions mirroring C# static API
