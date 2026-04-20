@@ -1,12 +1,13 @@
 # Custom Workflow Test Agent
 
-An example agent that demonstrates **five** workflow types:
+An example agent that demonstrates **six** workflow types:
 
 - A **Built-in conversational workflow** (`Supervisor Workflow`) using `BuiltinWorkflow` + `on_user_chat_message(...)`
 - A **Custom Temporal workflow** that takes **start parameters** (so the Xians UI shows **Input Parameters**)
 - A **Context Inspector workflow** that validates `XiansContext.CurrentAgent` / `CurrentWorkflow` resolve correctly inside a Temporal activity
 - A **Business Metrics workflow** that tests the metrics API with different scenarios (approvals, documents, emails, performance, tags)
 - A **Logging Test workflow** that emits logs at multiple levels and validates queue stats for server upload
+- A **Scheduling Test workflow** that exercises the full schedules API (create / pause / trigger / delete) and registers a `ScheduleTargetWorkflow` that schedule-triggered runs invoke
 
 This is useful for validating that the Python SDK matches C# behavior around:
 
@@ -56,6 +57,18 @@ This is useful for validating that the Python SDK matches C# behavior around:
 - Trigger: **Start workflow** with an optional `scenario` parameter
 - Scenarios: `basic` | `error` | `all` (default: `all`)
 - Emits logs using both `XiansLogger` and standard Python logging, then returns queued/retrying stats from `LoggingServices`
+
+### 6) Custom: `Schedule Test Workflow`
+- Type: `{AgentName}:Schedule Test Workflow`
+- Trigger: **Start workflow** with an optional `scenario` parameter
+- Exercises the full scheduling API from an activity context:
+  - `create_if_not_exists_async` (idempotent)
+  - `get_async` / `exists_async` / `describe_async`
+  - `pause_async` / `unpause_async`
+  - `trigger_async`
+  - `delete_async`
+- Registers `ScheduleTargetWorkflow` (`{AgentName}:Schedule Target Workflow`), which is the workflow invoked by the schedule's fire-time actions. You can observe scheduled runs in Temporal UI.
+- Returns a JSON report of each step so you can verify the outcome in the Xians UI
 
 ## Setup
 
