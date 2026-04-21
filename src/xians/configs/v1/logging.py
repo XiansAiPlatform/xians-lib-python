@@ -10,10 +10,23 @@ try:
 except ImportError:
     STRUCTLOG_AVAILABLE = False
 
-# HTTP transport loggers that are always suppressed on the console.
-# Matches C#: builder.AddFilter("Microsoft", consoleLogLevel)
-#                    .AddFilter("System", consoleLogLevel)
-_NOISY_LOGGERS = ("httpcore", "httpx", "hpack", "urllib3")
+# Logger namespaces pinned above the root level to reduce console noise.
+# Keys are logger names/prefixes and values are the minimum level to emit.
+#
+# - HTTP transports are noisy at DEBUG/INFO, so clamp them to WARNING.
+# - Temporal internals (workflow/worker/sandbox chatter) are often noisy at
+#   INFO/WARNING in local dev; clamp to ERROR so only actionable failures show.
+_NOISY_LOGGERS: dict[str, int] = {
+    "httpcore": logging.WARNING,
+    "httpx": logging.WARNING,
+    "hpack": logging.WARNING,
+    "urllib3": logging.WARNING,
+    "temporalio": logging.ERROR,
+    "temporalio.workflow": logging.ERROR,
+    "temporalio.worker": logging.ERROR,
+    "temporalio.worker._worker": logging.ERROR,
+    "temporalio.worker.workflow_sandbox": logging.ERROR,
+}
 
 
 def _get_root_level(console_level: int) -> int:
@@ -31,10 +44,9 @@ def _get_root_level(console_level: int) -> int:
 
 
 def _suppress_noisy_loggers() -> None:
-    """Pin HTTP transport loggers to WARNING so their DEBUG/TRACE chatter
-    never reaches the console, even when ``console_log_level=TRACE``."""
-    for name in _NOISY_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
+    """Pin noisy logger namespaces above the console/root threshold."""
+    for name, level in _NOISY_LOGGERS.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def configure_logging(
