@@ -20,6 +20,7 @@ from ...agents.knowledge.providers.factory import KnowledgeProviderFactory
 from ...agents.messaging.message_service import MessageService
 from ...agents.metrics import MetricsCollection
 from ...agents.metrics.usage_activities import UsageActivities
+from ...agents.scheduling import ScheduleCollection
 from ...configs.v1.logging import configure_logging
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
 from ...logging.logging_services import LoggingServices
@@ -35,6 +36,7 @@ from ...models.v1.configs import (
 from ...models.v1.entities import XiansAgentRegistration
 from ...temporal_workflows.v1.message_activities import MessageActivities
 from ...temporal_workflows.v1.models import WorkflowOptions
+from ...temporal_workflows.v1.schedule_activities import ScheduleActivities
 from ...temporal_workflows.v1.worker_runner import (
     WorkerHost,
     WorkerRegistry,
@@ -227,6 +229,7 @@ class AgentRegistration:
         self._knowledge: Optional[KnowledgeCollection] = None
         self._metrics: Optional[MetricsCollection] = None
         self._documents: Optional[DocumentCollection] = None
+        self._schedules: Optional[ScheduleCollection] = None
 
         XiansContext.register_agent(registration.name, self)
 
@@ -298,6 +301,26 @@ class AgentRegistration:
                 system_scoped=self.system_scoped,
             )
         return self._documents
+
+    @property
+    def schedules(self) -> ScheduleCollection:
+        """Access the agent's schedule collection (lazy-initialized).
+
+        Mirrors C# ``XiansAgent.Schedules``, accessible as
+        ``XiansContext.CurrentAgent.schedules`` from within workflows and
+        activities.
+        """
+        if self._schedules is None:
+            async def _get_client():
+                return self._platform._temporal_client
+
+            self._schedules = ScheduleCollection(
+                agent_name=self.name,
+                system_scoped=self.system_scoped,
+                tenant_id=self._tenant_id or None,
+                get_temporal_client=_get_client,
+            )
+        return self._schedules
 
     def define_builtin_workflow(
         self,
@@ -632,6 +655,7 @@ class XiansPlatform:
         message_activities = MessageActivities(self._message_service)
         usage_activities = UsageActivities(self.xians_client)
         document_activities = DocumentActivities(self.xians_client)
+        schedule_activities = ScheduleActivities()
 
         for agent_reg in self.agents.all():
             for wf in agent_reg._workflows:
@@ -644,6 +668,7 @@ class XiansPlatform:
                     message_activities,
                     usage_activities,
                     document_activities,
+                    schedule_activities,
                 ] + wf._activity_instances
 
                 task_queue = build_task_queue_name(

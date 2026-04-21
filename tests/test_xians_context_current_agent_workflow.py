@@ -198,3 +198,122 @@ class TestCurrentAgentAndWorkflowTogether:
 
         with pytest.raises(RuntimeError):
             _ = XiansContext.CurrentWorkflow
+
+
+# ---------------------------------------------------------------------------
+# ParticipantId (userId) resolution — C# parity tests
+# ---------------------------------------------------------------------------
+
+class TestParticipantIdResolution:
+    """Mirror C# ``GetParticipantId`` / ``SafeParticipantId`` behavior.
+
+    C# resolution order:
+      1. AsyncLocal contextvar (``SetParticipantId`` / message-processing).
+      2. ``Workflow.TypedSearchAttributes[userId]`` — only in workflow ctx.
+      3. ``Workflow.Memo[userId]`` — only in workflow ctx.
+      4. Throw (``GetParticipantId``) or return null (``SafeParticipantId``).
+    ``SafeParticipantId`` additionally gates on ``InWorkflowOrActivity``.
+    """
+
+    def test_get_participant_id_prefers_contextvar(self) -> None:
+        XiansContext.set_participant_id("user-1")
+        assert XiansContext.get_participant_id() == "user-1"
+
+    def test_get_participant_id_returns_none_when_no_source(self) -> None:
+        # Python diverges from C# here — C# throws, Python returns None to
+        # match the permissive Optional[str] return type used across the
+        # module. safe_participant_id is the strict entry point.
+        assert XiansContext.get_participant_id() is None
+
+    def test_safe_participant_id_returns_none_outside_workflow_or_activity(
+        self,
+    ) -> None:
+        """Matches C# ``SafeParticipantId`` which returns null when
+        ``InWorkflowOrActivity`` is false — even if a contextvar was set.
+        """
+        XiansContext.set_participant_id("user-1")
+        assert XiansContext.safe_participant_id() is None
+
+    def test_safe_participant_id_returns_contextvar_in_activity(self) -> None:
+        """Inside activity context, contextvar value is returned."""
+        import sys
+        import types
+        from unittest.mock import patch
+
+        temporalio = sys.modules.get("temporalio")
+        if temporalio is None:  # pragma: no cover
+            pytest.skip("temporalio package not available")
+
+        fake_info = types.SimpleNamespace(
+            workflow_id="t1:TestAgent:Conversational:thread-1",
+            workflow_run_id="run-1",
+        )
+        with patch(
+            "temporalio.activity.info", return_value=fake_info, create=True
+        ):
+            XiansContext.set_participant_id("user-from-ctx")
+            assert XiansContext.safe_participant_id() == "user-from-ctx"
+
+    def test_get_participant_id_falls_back_to_workflow_search_attrs(
+        self,
+    ) -> None:
+        """Inside workflow context, when contextvar is empty, read from
+        ``workflow.info().typed_search_attributes`` — matches C#
+        ``GetFromSearchAttributes``.
+        """
+        import sys
+        import types
+        from unittest.mock import patch
+
+        temporalio = sys.modules.get("temporalio")
+        if temporalio is None:  # pragma: no cover
+            pytest.skip("temporalio package not available")
+
+        from temporalio.common import (
+            SearchAttributeKey,
+            SearchAttributePair,
+            TypedSearchAttributes,
+        )
+
+        attrs = TypedSearchAttributes(
+            search_attributes=[
+                SearchAttributePair(
+                    SearchAttributeKey.for_keyword("userId"), "user-sa"
+                ),
+            ]
+        )
+        fake_info = types.SimpleNamespace(typed_search_attributes=attrs)
+
+        # Patch activity.info to fail (so the attribute lookup thinks we are
+        # NOT in an activity), and patch workflow.info to return fake_info.
+        with patch(
+            "temporalio.workflow.info", return_value=fake_info, create=True
+        ):
+            # No contextvar set → falls back to search attributes.
+            assert XiansContext.get_participant_id() == "user-sa"
+
+    def test_get_participant_id_falls_back_to_workflow_memo(self) -> None:
+        """Inside workflow context, when search attrs lack ``userId``, read
+        from the memo dict — matches C# ``GetFromWorkflowMemo``.
+        """
+        import sys
+        import types
+        from unittest.mock import patch
+
+        temporalio = sys.modules.get("temporalio")
+        if temporalio is None:  # pragma: no cover
+            pytest.skip("temporalio package not available")
+
+        from temporalio.common import TypedSearchAttributes
+
+        empty_attrs = TypedSearchAttributes(search_attributes=[])
+        fake_info = types.SimpleNamespace(typed_search_attributes=empty_attrs)
+
+        with patch(
+            "temporalio.workflow.info", return_value=fake_info, create=True
+        ), patch(
+            "temporalio.workflow.memo",
+            return_value={"userId": "user-memo"},
+            create=True,
+        ):
+            assert XiansContext.get_participant_id() == "user-memo"

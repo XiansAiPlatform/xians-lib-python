@@ -11,13 +11,23 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from temporalio.client import Client, TLSConfig
-from temporalio.worker import Worker
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from ...exceptions.v1.errors import ConfigurationError, TemporalError
 from ...models.v1.configs import TemporalConfig, TemporalTLSConfig
 from .tls_utils import resolve_cert_bytes, TLSMaterialError
 
 logger = logging.getLogger(__name__)
+
+
+# Xians runs workflows without Temporal's Python sandbox so that Python workers
+# behave identically to the C# agent library (which has no sandbox).  The C#
+# SDK relies on .NET runtime hooks to enforce determinism; Python without the
+# sandbox places that responsibility on workflow authors — the same contract
+# used in the C# library.  All Xians workflows only call deterministic Temporal
+# APIs (``workflow.info``, ``workflow.memo``, ``workflow.execute_activity`` …)
+# so no sandbox is required to guarantee replay safety.
+_XIANS_WORKFLOW_RUNNER = UnsandboxedWorkflowRunner()
 
 
 def build_task_queue_name(
@@ -159,6 +169,8 @@ class WorkerHost:
                 workflows=workflows or self._workflows,
                 activities=activities or self._activities,
                 max_concurrent_activities=max_concurrent_activities,
+                # Parity with the C# agent library — see ``_XIANS_WORKFLOW_RUNNER``.
+                workflow_runner=_XIANS_WORKFLOW_RUNNER,
             )
 
             asyncio.create_task(worker.run())

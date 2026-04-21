@@ -48,6 +48,11 @@ from document_db_test_workflow import DocumentDBTestWorkflow, test_document_db
 from messaging_test_workflow import MessagingTestWorkflow, test_proactive_messaging
 from logging_test_activities import run_logging_test
 from logging_test_workflow import LoggingTestWorkflow
+from schedule_test_workflow import (
+    ScheduleTargetWorkflow,
+    ScheduleTestWorkflow,
+    test_scheduling,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +82,8 @@ async def main() -> None:
             name=AGENT_NAME,
             description="Agent to test built-in + custom workflows, all messaging features",
             summary="Custom workflow test agent with full messaging",
-            version="0.3.1",
-            author="examples",
+            version="0.3.2",
+            author="Kavish Nanayakkara",
             is_template=True,
         )
     )
@@ -477,6 +482,21 @@ async def main() -> None:
             {"name": "scenario", "type": "string", "optional": True},
         ]
     )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 8) Scheduling Test workflow — exercises the full schedules API
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    schedule_wf = agent.define_custom_workflow(ScheduleTestWorkflow)
+    schedule_wf.add_activity(test_scheduling)
+    schedule_wf.set_parameter_definitions(
+        [
+            {"name": "scenario", "type": "string", "optional": True},
+        ]
+    )
+
+    # Register the schedule's target workflow so worker can execute it when
+    # the schedule fires.
+    agent.define_custom_workflow(ScheduleTargetWorkflow)
 
     await agent.run_all_async()
 
