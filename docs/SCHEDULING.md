@@ -301,8 +301,8 @@ Every schedule-triggered workflow execution carries a memo with:
 |-----|-------|
 | `tenantId` | Effective tenant ID |
 | `agent` | Registered agent name |
-| `userId` | Current participant ID (or `""`) |
-| `idPostfix` | Resolved idPostfix (or `""`) |
+| `userId` | Inherited participant ID (see resolution order below) |
+| `idPostfix` | Inherited idPostfix (see resolution order below) |
 | `systemScoped` | Whether the agent is system-scoped |
 
 User-supplied `.with_memo({...})` entries are merged on top.
@@ -317,13 +317,40 @@ operators can filter in the Temporal UI:
 |-----|------|---------|
 | `tenantId` | Keyword | Tenant the schedule was created in |
 | `agent` | Keyword | Registered agent name |
-| `userId` | Keyword | Current participant ID (or `""`) |
-| `idPostfix` | Keyword | Resolved idPostfix (or `""`) |
+| `userId` | Keyword | Inherited participant ID (see resolution order below) |
+| `idPostfix` | Keyword | Inherited idPostfix (see resolution order below) |
 
 Mirrors C# `WorkflowMetadataResolver.BuildSearchAttributes` — the four
 `StandardMetadataKeys`. They are attached automatically on every
 `create_async` / `create_if_not_exists_async` call; `.with_typed_search_attributes(...)`
 entries are merged on top (user-provided keys win on conflicts).
+
+### How `userId` and `idPostfix` are resolved
+
+Both values follow the same resolution order as the C# library
+(`ScheduleBuilder.GetEffectiveSearchAttributesForScheduleAsync` +
+`GetMemo`). The builder never requires the caller to pass these
+explicitly — it inherits them from the surrounding execution context:
+
+1. **Inside a workflow.** Read directly from
+   `workflow.info().typed_search_attributes` / `workflow.memo()` so the
+   schedule inherits the workflow's own standard metadata.
+2. **Inside an activity** (typical path from
+   `schedule_test_workflow.py`). The builder fetches the parent
+   workflow's description via `client.get_workflow_handle(...).describe()`
+   and reads `userId` / `idPostfix` from its typed search attributes, then
+   from its memo.
+3. **Async-local fallback.** `XiansContext.safe_participant_id()` /
+   `safe_id_postfix()` — useful in message-processing activities that
+   explicitly call `XiansContext.set_participant_id(...)`.
+4. **Empty string.** Temporal rejects null memo values, so missing data
+   serializes as `""` (same as C#).
+
+> If you see `userId` present but empty in the Temporal UI, it means none
+> of the inheritance sources had a value. Ensure your workflow is started
+> with a `userId` search attribute / memo (most Xians entry points do this
+> automatically), or call `XiansContext.set_participant_id(...)` before
+> creating the schedule.
 
 > **One-time setup required.** These four keys must be pre-registered on
 > your Temporal namespace (same requirement as the C# library). With the
@@ -574,3 +601,53 @@ Every one is available in the Python library:
 **Bottom line**: every method and behaviour documented in the C# library
 and `XiansAi.Docs/concepts/scheduling.md` has a direct, behaviour-equivalent
 counterpart in `xians-lib-python`.
+
+---
+
+## Worker sandbox: disabled for C# parity
+
+The C# Temporal SDK has no workflow sandbox — determinism is enforced
+directly by the .NET runtime through scheduler hooks on `await`. The Python
+SDK ships with a `SandboxedWorkflowRunner` by default which isolates each
+workflow's `sys.modules`, intercepts `os.environ`, `random`, `time`, etc.,
+and warns about late module imports and non-deterministic calls. Those
+warnings never appear in C# because C# doesn't need a sandbox.
+
+To mirror the C# library exactly, Xians Python runs workers with the
+built-in `UnsandboxedWorkflowRunner`:
+
+```python
+# src/xians/temporal_workflows/v1/worker_runner.py
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+_XIANS_WORKFLOW_RUNNER = UnsandboxedWorkflowRunner()
+
+worker = Worker(
+    client,
+    task_queue=task_queue,
+    workflows=workflows,
+    activities=activities,
+    workflow_runner=_XIANS_WORKFLOW_RUNNER,  # parity with C#
+)
+```
+
+### What this means for workflow authors
+
+- The "`Module X was imported after initial workflow load`" and
+  "`get on os.environ restricted`" warnings are gone — behaviour now
+  matches C# logs.
+- Determinism is the **author's responsibility**, same as in C#. Workflows
+  must only call Temporal-provided deterministic primitives
+  (`workflow.info`, `workflow.memo`, `workflow.execute_activity`,
+  `workflow.sleep`, `workflow.now`, etc.) and must not call
+  `random.random()`, `datetime.now()`, `uuid.uuid4()`, read files or
+  `os.environ` at runtime, or spawn threads.
+- All Xians-provided helpers (`XiansContext`, `WorkflowMetadataResolver`,
+  `ScheduleBuilder` from within a workflow) are already
+  deterministic-safe — they only read Temporal's workflow info / memo
+  or dispatch to activities.
+
+If you later introduce workflow code that must perform
+non-deterministic operations, move those calls into an **activity** (the
+same rule applies in C#).
+

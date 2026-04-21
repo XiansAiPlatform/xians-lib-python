@@ -77,9 +77,12 @@ class _PendingScheduleSpec:
 
 # Standard keyword search attributes that every Xians-managed schedule (and its
 # scheduled workflow executions) carries so operators can filter schedules by
-# tenant, agent, user, or run-scoping postfix in the Temporal UI.  Mirrors C#
-# ``WorkflowMetadataResolver.BuildSearchAttributes`` / ``StandardMetadataKeys``.
-_STANDARD_SEARCH_ATTR_KEYS = ("tenantId", "agent", "userId", "idPostfix")
+# tenant, agent, user, or run-scoping postfix in the Temporal UI. Single source
+# of truth lives in :class:`WorkflowMetadataResolver.STANDARD_METADATA_KEYS`
+# (mirrors C# ``StandardMetadataKeys``); re-exported here for local readability.
+from ..core.workflow_metadata_resolver import WorkflowMetadataResolver as _WMR
+
+_STANDARD_SEARCH_ATTR_KEYS = _WMR.STANDARD_METADATA_KEYS
 
 
 class ScheduleBuilder:
@@ -391,51 +394,171 @@ class ScheduleBuilder:
 
         raise InvalidScheduleSpecError("Pending schedule spec is incomplete")
 
-    def _build_standard_search_attributes(self, tenant_id: str) -> Any:
-        """Build the standard ``TypedSearchAttributes`` carried by every schedule.
+    async def _resolve_inherited_attrs_async(
+        self, client: "Client"
+    ) -> tuple[Any, Any]:
+        """Return ``(parent_typed_search_attrs, parent_memo)`` for context.
 
-        Keys (all ``Keyword``): ``tenantId``, ``agent``, ``userId``, ``idPostfix``.
+        Resolution order mirrors C#
+        ``GetEffectiveSearchAttributesForScheduleAsync``:
 
-        Mirrors C# ``WorkflowMetadataResolver.BuildSearchAttributes``. These
-        attributes **must be pre-registered** on the Temporal namespace (the
-        same way they are for the C# library).  If they are not registered,
-        Temporal will reject the ``CreateSchedule`` call with an error that
-        includes the missing key name.
+        1. Inside a workflow — use the current workflow's typed search
+           attributes and memo directly (no client call).
+        2. Inside an activity — fetch the parent workflow description via
+           :meth:`WorkflowMetadataResolver.fetch_workflow_description_async`.
+        3. Otherwise — no inheritance source available.
         """
-        from temporalio.common import (
-            SearchAttributeKey,
-            SearchAttributePair,
-            TypedSearchAttributes,
+        from ..core.workflow_metadata_resolver import WorkflowMetadataResolver
+
+        if WorkflowMetadataResolver._in_workflow():
+            try:
+                from temporalio import workflow as _workflow
+
+                info = _workflow.info()
+                parent_memo: Any = None
+                try:
+                    if hasattr(_workflow, "memo"):
+                        parent_memo = _workflow.memo()
+                except Exception:
+                    parent_memo = None
+                return (
+                    getattr(info, "typed_search_attributes", None),
+                    parent_memo,
+                )
+            except Exception:
+                return (None, None)
+
+        if WorkflowMetadataResolver._in_activity():
+            description = await WorkflowMetadataResolver.fetch_workflow_description_async(
+                client
+            )
+            if description is None:
+                return (None, None)
+            parent_attrs = getattr(description, "typed_search_attributes", None)
+            parent_memo = None
+            try:
+                if hasattr(description, "memo"):
+                    parent_memo = await description.memo()
+            except Exception:
+                parent_memo = None
+            return (parent_attrs, parent_memo)
+
+        return (None, None)
+
+    def _resolve_inherited_user_id(
+        self, parent_attrs: Any, parent_memo: Any
+    ) -> str:
+        """Resolve the effective ``userId`` for the schedule.
+
+        Priority mirrors C# ``GetMemo`` /
+        ``GetEffectiveSearchAttributesForScheduleAsync``:
+
+        1. Value from the inherited typed search attributes.
+        2. Value from the inherited workflow memo.
+        3. ``XiansContext.safe_participant_id()`` (async-local context).
+        4. Empty string — Temporal requires a non-null value.
+        """
+        from ..core.workflow_metadata_resolver import (
+            WorkflowMetadataKeys,
+            WorkflowMetadataResolver,
         )
 
-        user_id = XiansContext.safe_participant_id() or ""
-        values: dict[str, str] = {
-            "tenantId": tenant_id,
-            "agent": self._agent_name,
-            "userId": user_id,
-            "idPostfix": self._id_postfix or "",
-        }
-        pairs = [
-            SearchAttributePair(SearchAttributeKey.for_keyword(key), value)
-            for key, value in values.items()
-        ]
-        return TypedSearchAttributes(search_attributes=pairs)
+        from_attrs = WorkflowMetadataResolver.get_value_from_search_attributes(
+            parent_attrs, WorkflowMetadataKeys.USER_ID
+        )
+        if from_attrs:
+            return from_attrs
+        from_memo = WorkflowMetadataResolver.get_value_from_memo(
+            parent_memo, WorkflowMetadataKeys.USER_ID
+        )
+        if from_memo:
+            return from_memo
+        return XiansContext.safe_participant_id() or ""
 
-    def _resolve_effective_search_attributes(self, tenant_id: str) -> Any:
+    def _resolve_inherited_id_postfix(
+        self, parent_attrs: Any, parent_memo: Any
+    ) -> str:
+        """Resolve the effective ``idPostfix`` for the schedule.
+
+        Priority mirrors C# (search attrs → memo → configured id postfix →
+        context → empty).
+        """
+        from ..core.workflow_metadata_resolver import (
+            WorkflowMetadataKeys,
+            WorkflowMetadataResolver,
+        )
+
+        from_attrs = WorkflowMetadataResolver.get_value_from_search_attributes(
+            parent_attrs, WorkflowMetadataKeys.ID_POSTFIX
+        )
+        if from_attrs:
+            return from_attrs
+        from_memo = WorkflowMetadataResolver.get_value_from_memo(
+            parent_memo, WorkflowMetadataKeys.ID_POSTFIX
+        )
+        if from_memo:
+            return from_memo
+        if self._id_postfix:
+            return self._id_postfix
+        return XiansContext.safe_id_postfix() or ""
+
+    def _build_standard_search_attributes(
+        self,
+        tenant_id: str,
+        *,
+        user_id: Optional[str] = None,
+        id_postfix: Optional[str] = None,
+    ) -> Any:
+        """Build the standard ``TypedSearchAttributes`` carried by every schedule.
+
+        Delegates to :meth:`WorkflowMetadataResolver.build_search_attributes`
+        so there is one canonical implementation of the 4-key construction
+        (mirrors C# ``WorkflowMetadataResolver.BuildSearchAttributes``).
+
+        The standard keys must be pre-registered on the Temporal namespace —
+        same requirement as the C# library.
+        """
+        from ..core.workflow_metadata_resolver import WorkflowMetadataResolver
+
+        resolved_user_id = (
+            user_id if user_id is not None
+            else (XiansContext.safe_participant_id() or "")
+        )
+        resolved_id_postfix = (
+            id_postfix if id_postfix is not None
+            else (self._id_postfix or "")
+        )
+        return WorkflowMetadataResolver.build_search_attributes(
+            tenant_id,
+            self._agent_name,
+            resolved_user_id,
+            resolved_id_postfix,
+        )
+
+    def _resolve_effective_search_attributes(
+        self,
+        tenant_id: str,
+        *,
+        user_id: Optional[str] = None,
+        id_postfix: Optional[str] = None,
+    ) -> Any:
         """Return the ``TypedSearchAttributes`` to attach to the schedule.
 
         Priority (matches C# ``GetEffectiveSearchAttributesForScheduleAsync``):
 
         1. User-provided via :meth:`with_typed_search_attributes` — merged with
            the 4 standard keys so those are always present.
-        2. The 4 standard keys built from the current context.
+        2. The 4 standard keys built from the current context (or inherited
+           from the parent workflow when the caller supplies ``user_id`` /
+           ``id_postfix``).
         """
-        standard = self._build_standard_search_attributes(tenant_id)
+        standard = self._build_standard_search_attributes(
+            tenant_id, user_id=user_id, id_postfix=id_postfix
+        )
 
         if self._typed_search_attributes is None:
             return standard
 
-        # Merge: user-provided wins on conflicts, standard keys fill the gaps.
         from temporalio.common import TypedSearchAttributes
 
         try:
@@ -453,20 +576,35 @@ class ScheduleBuilder:
                 merged.append(pair)
         return TypedSearchAttributes(search_attributes=merged)
 
-    def _build_memo(self, tenant_id: str) -> dict[str, Any]:
+    def _build_memo(
+        self,
+        tenant_id: str,
+        *,
+        user_id: Optional[str] = None,
+        id_postfix: Optional[str] = None,
+    ) -> dict[str, Any]:
         """Build memo dict attached to every scheduled workflow execution.
 
         Mirrors C# ``ScheduleBuilder.GetMemo`` (system-required metadata merged
         with user-provided memo).  Values cannot be ``None`` — Temporal rejects
         null memo entries — so we fall back to empty strings.
         """
-        user_id = XiansContext.safe_participant_id() or ""
+        from ..core.workflow_metadata_resolver import WorkflowMetadataKeys
+
+        resolved_user_id = (
+            user_id if user_id is not None
+            else (XiansContext.safe_participant_id() or "")
+        )
+        resolved_id_postfix = (
+            id_postfix if id_postfix is not None
+            else (self._id_postfix or "")
+        )
         memo: dict[str, Any] = {
-            "tenantId": tenant_id,
-            "agent": self._agent_name,
-            "userId": user_id,
-            "idPostfix": self._id_postfix or "",
-            "systemScoped": self._system_scoped,
+            WorkflowMetadataKeys.TENANT_ID: tenant_id,
+            WorkflowMetadataKeys.AGENT: self._agent_name,
+            WorkflowMetadataKeys.USER_ID: resolved_user_id,
+            WorkflowMetadataKeys.ID_POSTFIX: resolved_id_postfix,
+            WorkflowMetadataKeys.SYSTEM_SCOPED: self._system_scoped,
         }
         if self._workflow_memo:
             memo.update(self._workflow_memo)
@@ -512,10 +650,28 @@ class ScheduleBuilder:
             tenant_id, self._workflow_type, self._id_postfix or ""
         )
 
+        # Resolve userId / idPostfix by inheriting from the parent workflow
+        # when in activity context (mirrors C#
+        # ``GetEffectiveSearchAttributesForScheduleAsync`` which fetches the
+        # parent workflow description via the Temporal client).
+        parent_attrs, parent_memo = await self._resolve_inherited_attrs_async(
+            client
+        )
+        inherited_user_id = self._resolve_inherited_user_id(
+            parent_attrs, parent_memo
+        )
+        inherited_id_postfix = self._resolve_inherited_id_postfix(
+            parent_attrs, parent_memo
+        )
+
         # Always attach the 4 standard keyword search attributes (tenantId,
         # agent, userId, idPostfix) — merged with any user-provided ones.
         # Matches C# ``GetEffectiveSearchAttributesForScheduleAsync``.
-        search_attributes = self._resolve_effective_search_attributes(tenant_id)
+        search_attributes = self._resolve_effective_search_attributes(
+            tenant_id,
+            user_id=inherited_user_id,
+            id_postfix=inherited_id_postfix,
+        )
         schedule_spec = self._build_temporal_schedule_spec()
         schedule_action = ScheduleActionStartWorkflow(
             self._workflow_type,
@@ -525,7 +681,11 @@ class ScheduleBuilder:
             retry_policy=self._retry_policy,
             run_timeout=self._timeout,
             typed_search_attributes=search_attributes,
-            memo=self._build_memo(tenant_id),
+            memo=self._build_memo(
+                tenant_id,
+                user_id=inherited_user_id,
+                id_postfix=inherited_id_postfix,
+            ),
         )
 
         schedule = Schedule(

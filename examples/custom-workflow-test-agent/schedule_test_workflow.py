@@ -122,8 +122,8 @@ async def test_scheduling(scenario: str = "full") -> str:
         log_step("trigger", {"ok": True})
 
         # # ── 8. Delete ──
-        await agent.schedules.delete_async(SCHEDULE_NAME)
-        log_step("delete", {"ok": True})
+        # await agent.schedules.delete_async(SCHEDULE_NAME)
+        # log_step("delete", {"ok": True})
 
         exists_after = await agent.schedules.exists_async(SCHEDULE_NAME)
         log_step("exists_after_delete", {"exists": exists_after})

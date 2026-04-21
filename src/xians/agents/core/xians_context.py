@@ -177,7 +177,27 @@ class XiansContext(metaclass=_XiansContextMeta):
 
     @staticmethod
     def get_participant_id() -> Optional[str]:
-        return _current_participant_id.get()
+        """Resolve participant ID (a.k.a. ``userId``).
+
+        Resolution order mirrors C# ``XiansContext.GetParticipantId``:
+
+        1. Async-local contextvar (set via :meth:`set_participant_id` or
+           message-processing activities).
+        2. Current workflow's typed search attributes — only when inside a
+           Temporal workflow.
+        3. Current workflow's memo — only when inside a Temporal workflow.
+
+        Returns ``None`` if no source yields a value.  C# throws
+        ``InvalidOperationException`` when outside workflow/activity;  Python
+        keeps the permissive ``Optional[str]`` return type used elsewhere in
+        this module — callers that need strict behavior should use
+        :meth:`safe_participant_id` which additionally gates on
+        :meth:`in_workflow_or_activity`.
+        """
+        value = _current_participant_id.get()
+        if value:
+            return value
+        return XiansContext._get_from_workflow_context("userId")
 
     @staticmethod
     def set_participant_id(value: Optional[str]) -> None:
@@ -210,9 +230,17 @@ class XiansContext(metaclass=_XiansContextMeta):
 
     @staticmethod
     def safe_participant_id() -> Optional[str]:
-        """Safely get participant ID without raising. Returns None if unavailable."""
+        """Safely get participant ID without raising. Returns None if unavailable.
+
+        Mirrors C# ``XiansContext.SafeParticipantId`` /
+        ``TryGetParticipantId``: returns ``null`` when not in workflow or
+        activity context, otherwise delegates to :meth:`get_participant_id`
+        which walks contextvar → workflow search attributes → workflow memo.
+        """
         try:
-            return _current_participant_id.get()
+            if not XiansContext.in_workflow_or_activity():
+                return None
+            return XiansContext.get_participant_id()
         except Exception:
             return None
 
@@ -336,6 +364,18 @@ class XiansContext(metaclass=_XiansContextMeta):
         return XiansContext._try_get_from_temporal_workflow(attr)
 
     @staticmethod
+    def _get_from_workflow_context(key_name: str) -> Optional[str]:
+        """Resolve metadata from the current workflow's search attrs / memo.
+
+        Thin delegation to :class:`WorkflowMetadataResolver.get_from_workflow_context`
+        so there's a single source of truth for workflow metadata reads
+        (matches C# which centralizes this in ``WorkflowMetadataResolver``).
+        """
+        from .workflow_metadata_resolver import WorkflowMetadataResolver
+
+        return WorkflowMetadataResolver.get_from_workflow_context(key_name)
+
+    @staticmethod
     def in_activity() -> bool:
         """Check if currently executing inside a Temporal activity."""
         try:
@@ -363,8 +403,6 @@ class XiansContext(metaclass=_XiansContextMeta):
     # Workflow ID parsing (mirrors C# TenantContext / WorkflowMetadataResolver)
     # ------------------------------------------------------------------
 
-    _TEMPORAL_SCHEDULED_TIMESTAMP_RE = None
-
     @staticmethod
     def _extract_tenant_id_from_workflow_id() -> Optional[str]:
         """Extract tenant ID from the workflow ID (first segment before ':').
@@ -382,29 +420,21 @@ class XiansContext(metaclass=_XiansContextMeta):
 
     @staticmethod
     def _parse_id_postfix_from_workflow_id() -> Optional[str]:
-        """Parse idPostfix from workflow ID (4th segment, stripped of Temporal timestamp suffix).
+        """Parse idPostfix from workflow ID.
 
-        Mirrors C# WorkflowMetadataResolver.ParseIdPostfixFromWorkflowId.
-        Workflow ID format: {tenantId}:{agentName}:{workflowName}:{idPostfix}
+        Thin delegation to
+        :meth:`WorkflowMetadataResolver.parse_id_postfix_from_workflow_id`
+        so all workflow-ID parsing shares a single regex/implementation
+        (mirrors C# ``WorkflowMetadataResolver.ParseIdPostfixFromWorkflowId``).
         """
-        import re
+        from .workflow_metadata_resolver import WorkflowMetadataResolver
 
         workflow_id = XiansContext.get_workflow_id()
         if not workflow_id:
             return None
-        parts = workflow_id.split(":")
-        if len(parts) < 4:
-            return None
-        id_part = parts[3]
-        if not id_part:
-            return None
-
-        if XiansContext._TEMPORAL_SCHEDULED_TIMESTAMP_RE is None:
-            XiansContext._TEMPORAL_SCHEDULED_TIMESTAMP_RE = re.compile(
-                r"(?:-\d{4}-\d{2}-\d{2}T[\d:.Z]+)+$"
-            )
-        stripped = XiansContext._TEMPORAL_SCHEDULED_TIMESTAMP_RE.sub("", id_part)
-        return stripped if stripped else id_part
+        return WorkflowMetadataResolver.parse_id_postfix_from_workflow_id(
+            workflow_id
+        )
 
     # ------------------------------------------------------------------
     # Internal resolution helpers (used by metaclass properties)

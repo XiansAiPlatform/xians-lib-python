@@ -349,6 +349,95 @@ class TestScheduleBuilderInternals:
         assert pairs["userId"] == ""
         assert pairs["idPostfix"] == "run-1"
 
+    @pytest.mark.skipif(
+        not _HAS_REAL_TEMPORALIO, reason="Requires real temporalio package"
+    )
+    def test_standard_search_attributes_use_inherited_user_id(self) -> None:
+        """When the caller inherits ``userId`` from the parent workflow's
+        search attrs/memo, it flows into the schedule's standard attrs.
+        Mirrors C# ``GetEffectiveSearchAttributesForScheduleAsync`` which pulls
+        ``userId`` from the parent workflow description."""
+        XiansContext.clear()
+        b = _make_builder(id_postfix="run-1")
+        sa = b._build_standard_search_attributes(
+            tenant_id="tenant-1",
+            user_id="user-from-parent",
+            id_postfix="run-from-parent",
+        )
+        pairs = {p.key.name: p.value for p in sa.search_attributes}
+        assert pairs == {
+            "tenantId": "tenant-1",
+            "agent": "AgentX",
+            "userId": "user-from-parent",
+            "idPostfix": "run-from-parent",
+        }
+
+    @pytest.mark.skipif(
+        not _HAS_REAL_TEMPORALIO, reason="Requires real temporalio package"
+    )
+    def test_resolve_inherited_user_id_reads_from_parent_attrs(self) -> None:
+        """``userId`` resolves from the parent workflow's typed search attrs
+        first, then memo, then async-local context, then empty string.
+
+        Mirrors C# ``ScheduleBuilder.GetEffectiveSearchAttributesForScheduleAsync``
+        which uses ``TryGetParticipantId()`` (= ``SafeParticipantId``) as the
+        contextvar fallback; that helper returns ``null`` outside
+        workflow/activity, so the final fallback becomes ``""``.
+        """
+        from temporalio.common import (
+            SearchAttributeKey,
+            SearchAttributePair,
+            TypedSearchAttributes,
+        )
+
+        XiansContext.clear()
+        b = _make_builder(id_postfix="run-1")
+
+        # 1. From parent typed search attributes (highest priority).
+        parent_attrs = TypedSearchAttributes(
+            search_attributes=[
+                SearchAttributePair(
+                    SearchAttributeKey.for_keyword("userId"), "user-sa"
+                ),
+            ]
+        )
+        assert b._resolve_inherited_user_id(parent_attrs, None) == "user-sa"
+
+        # 2. From parent memo when attrs lack the key.
+        assert (
+            b._resolve_inherited_user_id(None, {"userId": "user-memo"})
+            == "user-memo"
+        )
+
+        # 3. Outside workflow/activity, safe_participant_id returns None even
+        #    if a contextvar was set — matches C# SafeParticipantId gating on
+        #    InWorkflowOrActivity. Final fallback therefore becomes "".
+        XiansContext.set_participant_id("user-context")
+        try:
+            assert b._resolve_inherited_user_id(None, None) == ""
+        finally:
+            XiansContext.clear()
+
+        # 4. Empty string when no source is available.
+        assert b._resolve_inherited_user_id(None, None) == ""
+
+    @pytest.mark.skipif(
+        not _HAS_REAL_TEMPORALIO, reason="Requires real temporalio package"
+    )
+    def test_build_memo_uses_inherited_user_id(self) -> None:
+        """Memo ``userId`` reflects the inherited value, not the empty fallback."""
+        XiansContext.clear()
+        b = _make_builder(id_postfix="run-1")
+        memo = b._build_memo(
+            tenant_id="tenant-1",
+            user_id="user-from-parent",
+            id_postfix="run-from-parent",
+        )
+        assert memo["userId"] == "user-from-parent"
+        assert memo["idPostfix"] == "run-from-parent"
+        assert memo["tenantId"] == "tenant-1"
+        assert memo["agent"] == "AgentX"
+
 
 # ---------------------------------------------------------------------------
 # ScheduleCollection
