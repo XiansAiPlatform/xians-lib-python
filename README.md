@@ -2,7 +2,8 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://github.com/xians-platform/xians-lib-python/workflows/tests/badge.svg)](https://github.com/xians-platform/xians-lib-python/actions)
+[![CI](https://github.com/XiansAiPlatform/xians-lib-python/actions/workflows/ci.yml/badge.svg)](https://github.com/XiansAiPlatform/xians-lib-python/actions/workflows/ci.yml)
+[![Release](https://github.com/XiansAiPlatform/xians-lib-python/actions/workflows/release.yml/badge.svg)](https://github.com/XiansAiPlatform/xians-lib-python/actions/workflows/release.yml)
 
 **Temporal-first agent execution substrate with optional Xians Server integration.**
 
@@ -25,9 +26,44 @@ Build durable, scalable AI agents using ANY framework—LangChain, custom code, 
 
 ### Installation
 
+The SDK is distributed directly from GitHub (PyPI release is planned). Pin to
+a specific tag in production — don't install from `main` in deployed systems.
+
+**Latest release (recommended):**
+
 ```bash
-pip install xians-lib-python
+pip install "git+https://github.com/XiansAiPlatform/xians-lib-python.git@v0.1.0"
 ```
+
+**Specific wheel from a GitHub Release:**
+
+```bash
+pip install https://github.com/XiansAiPlatform/xians-lib-python/releases/download/v0.1.0/xians_lib_python-0.1.0-py3-none-any.whl
+```
+
+**Latest `main` (development only):**
+
+```bash
+pip install "git+https://github.com/XiansAiPlatform/xians-lib-python.git@main"
+```
+
+**Add to `requirements.txt`:**
+
+```text
+xians-lib-python @ git+https://github.com/XiansAiPlatform/xians-lib-python.git@v0.1.0
+```
+
+**Add to another project's `pyproject.toml`:**
+
+```toml
+[project]
+dependencies = [
+    "xians-lib-python @ git+https://github.com/XiansAiPlatform/xians-lib-python.git@v0.1.0",
+]
+```
+
+See [docs/RELEASING.md](docs/RELEASING.md) for all installation variants and
+the full release process.
 
 ### Basic Example
 
@@ -86,6 +122,7 @@ if __name__ == "__main__":
 
 - **[User Guide](docs/USER_GUIDE.md)** - Complete guide for using the SDK
 - **[Development Guide](docs/DEVELOPMENT_GUIDE.md)** - Guide for contributing to the SDK
+- **[Releasing Guide](docs/RELEASING.md)** - Versioning, tagging, and publishing releases
 - **[Architecture](docs/ARCHITECTURE.md)** - Deep dive into SDK design
 - **[API Reference](./docs/API.md)** - Detailed API documentation
 - **[Examples](./examples/)** - Working code examples
@@ -237,7 +274,7 @@ async def execute_agent_activity(request: AgentRequest) -> AgentResponse:
 
 ```bash
 # Clone repository
-git clone https://github.com/xians-platform/xians-lib-python.git
+git clone https://github.com/XiansAiPlatform/xians-lib-python.git
 cd xians-lib-python
 
 # Create virtual environment
@@ -318,8 +355,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🔗 Links
 
 - **Documentation**: [docs/](./docs/)
-- **GitHub**: [xians-platform/xians-lib-python](https://github.com/xians-platform/xians-lib-python)
-- **Issues**: [GitHub Issues](https://github.com/xians-platform/xians-lib-python/issues)
+- **GitHub**: [XiansAiPlatform/xians-lib-python](https://github.com/XiansAiPlatform/xians-lib-python)
+- **Issues**: [GitHub Issues](https://github.com/XiansAiPlatform/xians-lib-python/issues)
+- **Releases**: [GitHub Releases](https://github.com/XiansAiPlatform/xians-lib-python/releases)
 - **Temporal**: [temporal.io](https://temporal.io)
 - **Xians Platform**: [xians.ai](https://xians.ai)
 

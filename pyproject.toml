@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xians-lib-python"
-version = "0.1.0"
-description = "Temporal-native agent runtime with Xians server integration and LLM-agnostic layer"
+version = "3.23.0a1"
+description = "Temporal-native agent runtime with Xians server integration (parity with XiansAi.Lib for .NET)"
 authors = [
     {name = "Xians Platform", email = "info@xians.ai"}
 ]
@@ -49,16 +49,18 @@ structlog = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xians-platform/xians-lib-python"
-Documentation = "https://docs.xians.ai/python"
-Repository = "https://github.com/xians-platform/xians-lib-python"
-"Bug Tracker" = "https://github.com/xians-platform/xians-lib-python/issues"
+Homepage = "https://github.com/XiansAiPlatform/xians-lib-python"
+Documentation = "https://github.com/XiansAiPlatform/xians-lib-python/tree/main/docs"
+Repository = "https://github.com/XiansAiPlatform/xians-lib-python"
+"Bug Tracker" = "https://github.com/XiansAiPlatform/xians-lib-python/issues"
+Changelog = "https://github.com/XiansAiPlatform/xians-lib-python/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["xians*"]
 
 [tool.setuptools.package-data]
-"*" = ["py.typed"]
+xians = ["py.typed"]
 
 # Black configuration
 [tool.black]
@@ -114,7 +116,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"src/llm_adapters/v1/__init__.py" = ["ARG002"]  # Stub methods have unused arguments
 
 # mypy configuration
 [tool.mypy]

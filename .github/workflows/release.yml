@@ -1,0 +1,167 @@
+name: Build and Publish Release
+
+on:
+  push:
+    tags:
+      - "v*" # Trigger on version tags like v1.0.0, v2.1.0, v1.0.0rc1, etc.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to release (e.g. v0.2.0)"
+        required: true
+
+env:
+  PACKAGE_NAME: xians-lib-python
+
+permissions:
+  contents: write # needed to create GitHub Releases
+
+jobs:
+  build-and-release:
+    name: Build, verify, and publish GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            RAW_TAG="${{ inputs.tag }}"
+          else
+            RAW_TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${RAW_TAG#v}"
+          echo "raw_tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: $VERSION (from tag $RAW_TAG)"
+
+      - name: Validate PEP 440 version format
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          version = os.environ["VERSION"]
+          # PEP 440 (simplified but practical): 1.2.3, 1.2.3a1, 1.2.3b2, 1.2.3rc1,
+          # 1.2.3.post1, 1.2.3.dev1, and optional local segment +meta
+          pattern = re.compile(
+              r"^\d+\.\d+\.\d+"
+              r"((a|b|rc)\d+)?"
+              r"(\.post\d+)?"
+              r"(\.dev\d+)?"
+              r"(\+[a-zA-Z0-9._-]+)?$"
+          )
+          if not pattern.match(version):
+              sys.exit(
+                  f"Invalid PEP 440 version: '{version}'. "
+                  "Expected formats: 1.2.3 | 1.2.3rc1 | 1.2.3a1 | 1.2.3.post1"
+              )
+          print(f"Version format is valid: {version}")
+          PY
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" build twine
+
+      - name: Validate pyproject.toml version matches tag
+        shell: bash
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+          import tomllib
+
+          pyproject = pathlib.Path("pyproject.toml")
+          data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+          project_version = data["project"]["version"]
+          tag_version = os.environ["TAG_VERSION"]
+          if project_version != tag_version:
+              sys.exit(
+                  "Version mismatch between pyproject.toml and git tag:\n"
+                  f"  pyproject.toml: {project_version}\n"
+                  f"  git tag:        {tag_version}\n"
+                  "Bump [project].version in pyproject.toml before tagging."
+              )
+          print(f"Version check passed: {project_version}")
+          PY
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Type check
+        run: mypy src
+
+      - name: Run tests
+        run: pytest --cov=src --cov-report=term-missing
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Verify distributions
+        run: twine check dist/*
+
+      - name: Smoke test the built wheel
+        shell: bash
+        run: |
+          python -m venv /tmp/smoke-env
+          /tmp/smoke-env/bin/pip install --upgrade pip
+          /tmp/smoke-env/bin/pip install dist/*.whl
+          /tmp/smoke-env/bin/python -c "import xians; print('xians', xians.__version__)"
+
+      - name: Create GitHub Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.raw_tag }}
+          name: ${{ env.PACKAGE_NAME }} ${{ steps.version.outputs.raw_tag }}
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.version, 'a') || contains(steps.version.outputs.version, 'b') || contains(steps.version.outputs.version, 'rc') || contains(steps.version.outputs.version, '.dev') }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Publish release summary
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.raw_tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          {
+            echo "## Release Published"
+            echo ""
+            echo "- **Package:** \`${{ env.PACKAGE_NAME }}\`"
+            echo "- **Version:** \`$VERSION\`"
+            echo "- **Tag:** \`$TAG\`"
+            echo ""
+            echo "### Install from GitHub tag"
+            echo ""
+            echo '```bash'
+            echo "pip install \"git+https://github.com/$REPO.git@$TAG\""
+            echo '```'
+            echo ""
+            echo "### Install from GitHub Release wheel"
+            echo ""
+            echo '```bash'
+            echo "pip install https://github.com/$REPO/releases/download/$TAG/${{ env.PACKAGE_NAME }}-$VERSION-py3-none-any.whl"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

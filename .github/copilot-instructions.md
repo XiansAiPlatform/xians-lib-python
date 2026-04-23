@@ -30,18 +30,25 @@
 
 ## Current repository structure (do not break it)
 
-Current structure under `src/`:
+Current structure under `src/xians/` (the single top-level package):
 
+- `agents/` (core, scheduling, messaging, metrics, knowledge, documents)
 - `configs/v1/`
 - `constants/v1/`
 - `exceptions/v1/`
 - `interfaces/v1/`
-- `llm_adapters/v1/`
+- `logging/`
+- `middleware/v1/`
 - `models/v1/`
+- `platform/v1/`
 - `temporal_workflows/v1/`
 - `utils/v1/`
 
-**Preserve this structure**, but expand within it. Add new modules/subpackages as needed under these v1 packages.
+**Preserve this structure**, but expand within it. Add new modules/subpackages as needed under these packages.
+
+> LLM provider adapters are intentionally **NOT** part of this SDK — this
+> mirrors `XiansAi.Lib` (.NET). Users bring their own LLM framework inside
+> their Temporal activities. Do not reintroduce an `llm_adapters/` package.
 
 ---
 

@@ -88,15 +88,18 @@ mypy src
 
 ```
 xians-lib-python/
-├── src/                    # Source code
-│   ├── configs/           # Configuration management
-│   ├── constants/v1/      # Constants and enums
-│   ├── exceptions/v1/     # Custom exceptions
-│   ├── interfaces/v1/     # Abstract interfaces
-│   ├── llm_adapters/v1/   # LLM provider adapters
-│   ├── models/v1/         # Pydantic data models
-│   ├── temporal_workflows/v1/ # Temporal workflows
-│   └── utils/v1/          # Utility functions
+├── src/xians/              # Source code (single top-level package: `xians`)
+│   ├── agents/             # Agent runtime (core, scheduling, messaging, metrics, knowledge, documents)
+│   ├── configs/v1/         # Configuration management
+│   ├── constants/v1/       # Constants and enums
+│   ├── exceptions/v1/      # Custom exceptions
+│   ├── interfaces/v1/      # Public platform/client interfaces
+│   ├── logging/            # Structured logging and API handler
+│   ├── middleware/v1/      # Middleware primitives
+│   ├── models/v1/          # Pydantic data models
+│   ├── platform/v1/        # Platform facade (XiansPlatform)
+│   ├── temporal_workflows/v1/ # Temporal workflows (SDK-owned)
+│   └── utils/v1/           # Utility functions
 ├── tests/                 # Test suite
 │   ├── conftest.py       # Pytest fixtures
 │   ├── test_constants.py
